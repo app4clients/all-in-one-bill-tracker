@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+/* Brand-aligned glow feedback with semantic variants */
+button {
+  position: relative;
+  --glow-ring: rgba(56, 189, 248, 0.45);
+  --glow-main: rgba(34, 211, 238, 0.65);
+  --glow-secondary: rgba(59, 130, 246, 0.45);
+  transition: box-shadow 160ms ease, transform 120ms ease, filter 160ms ease;
+}
+
+button[class*="bg-emerald"],
+button[class*="text-emerald"],
+button[class*="border-emerald"] {
+  --glow-ring: rgba(16, 185, 129, 0.45);
+  --glow-main: rgba(52, 211, 153, 0.6);
+  --glow-secondary: rgba(134, 239, 172, 0.45);
+}
+
+button[class*="bg-red"],
+button[class*="text-red"],
+button[class*="border-red"],
+button[class*="bg-rose"],
+button[class*="text-rose"],
+button[class*="border-rose"] {
+  --glow-ring: rgba(239, 68, 68, 0.5);
+  --glow-main: rgba(248, 113, 113, 0.6);
+  --glow-secondary: rgba(251, 146, 60, 0.45);
+}
+
+button:active {
+  transform: translateY(1px) scale(0.99);
+  filter: brightness(1.04);
+  box-shadow:
+    0 0 0 2px var(--glow-ring),
+    0 0 18px var(--glow-main),
+    0 0 30px var(--glow-secondary);
+}
+
+button:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--glow-ring),
+    0 0 16px var(--glow-main);
+}
