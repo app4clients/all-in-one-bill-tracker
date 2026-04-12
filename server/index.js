@@ -2,13 +2,16 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import jwt from "jsonwebtoken";
-import { randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import {
   authenticateByUsernamePassword,
+  consumePasswordResetToken,
+  createPasswordResetToken,
   ensureUser,
   getActiveEntitlement,
+  getUserByEmail,
   listAuthRejectionEvents,
   getSubscriptionByToken,
   getSubscriptionsByUser,
@@ -16,6 +19,7 @@ import {
   registerUserProfile,
   saveAuthRejectionEvent,
   saveBillingEvent,
+  updateUserPasswordById,
   upsertSubscription,
 } from "./db.js";
 import { verifySubscriptionToken } from "./googlePlay.js";
@@ -49,9 +53,21 @@ const loginSchema = z.object({
   password: z.string().min(8).max(72),
 });
 
+const forgotPasswordSchema = z.object({
+  email: z.string().trim().email().max(150),
+});
+
+const resetPasswordSchema = z.object({
+  email: z.string().trim().email().max(150),
+  resetToken: z.string().trim().min(8).max(128),
+  newPassword: z.string().min(8).max(72),
+});
+
 const USERNAME_REGEX = /^[a-zA-Z0-9._-]{3,24}$/;
 const PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
 const DEFAULT_BLOCKED_USERNAME_WORDS = ["sex", "porn", "xxx", "nude", "adult", "escort", "camgirl", "onlyfans"];
+const PASSWORD_RESET_TTL_MINUTES = Number(process.env.AUTH_PASSWORD_RESET_TTL_MINUTES ?? 15);
+const EXPOSE_RESET_TOKEN = process.env.AUTH_EXPOSE_RESET_TOKEN === "true";
 
 function parseBlockedWords(raw) {
   if (!raw) {
@@ -122,6 +138,10 @@ function normalizePhoneNumber(phoneNumber) {
 
 function normalizeEmail(email) {
   return email.trim().toLowerCase();
+}
+
+function hashResetToken(resetToken) {
+  return createHash("sha256").update(resetToken).digest("hex");
 }
 
 function normalizeForModeration(value) {
@@ -437,6 +457,105 @@ app.post("/api/auth/login", async (req, res) => {
       ok: false,
       code: "LOGIN_FAILED",
       message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+app.post("/api/auth/forgot-password", async (req, res) => {
+  try {
+    const parsed = forgotPasswordSchema.parse(req.body);
+    const emailNormalized = normalizeEmail(parsed.email);
+    const user = await getUserByEmail(emailNormalized);
+
+    if (!user?.id) {
+      await logAuthRejection(req, {
+        reasonCode: "FORGOT_PASSWORD_UNKNOWN_EMAIL",
+        email: parsed.email,
+      });
+      return res.status(200).json({
+        ok: true,
+        message: "If the email exists, reset instructions were generated.",
+      });
+    }
+
+    const resetToken = randomBytes(24).toString("hex");
+    const tokenHash = hashResetToken(resetToken);
+    const expiresAt = new Date(Date.now() + Math.max(5, PASSWORD_RESET_TTL_MINUTES) * 60 * 1000);
+
+    await createPasswordResetToken({
+      userId: user.id,
+      tokenHash,
+      expiresAt,
+    });
+
+    const responsePayload = {
+      ok: true,
+      message: "If the email exists, reset instructions were generated.",
+      expiresInMinutes: Math.max(5, PASSWORD_RESET_TTL_MINUTES),
+      ...(EXPOSE_RESET_TOKEN ? { resetToken } : {}),
+    };
+
+    return res.status(200).json(responsePayload);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      await logAuthRejection(req, {
+        reasonCode: "FORGOT_PASSWORD_VALIDATION_FAILED",
+        payload: { issues: error.issues.map((issue) => issue.path.join(".") || issue.code) },
+      });
+    }
+    return res.status(400).json({
+      ok: false,
+      code: "FORGOT_PASSWORD_FAILED",
+      message: "Unable to process forgot password request.",
+    });
+  }
+});
+
+app.post("/api/auth/reset-password", async (req, res) => {
+  try {
+    const parsed = resetPasswordSchema.parse(req.body);
+    const emailNormalized = normalizeEmail(parsed.email);
+    const user = await getUserByEmail(emailNormalized);
+    if (!user?.id) {
+      await logAuthRejection(req, {
+        reasonCode: "RESET_PASSWORD_UNKNOWN_EMAIL",
+        email: parsed.email,
+      });
+      return res.status(400).json({ ok: false, code: "INVALID_RESET_TOKEN" });
+    }
+
+    const tokenHash = hashResetToken(parsed.resetToken);
+    const tokenWasConsumed = await consumePasswordResetToken({
+      userId: user.id,
+      tokenHash,
+    });
+
+    if (!tokenWasConsumed) {
+      await logAuthRejection(req, {
+        reasonCode: "RESET_PASSWORD_INVALID_TOKEN",
+        email: parsed.email,
+      });
+      return res.status(400).json({ ok: false, code: "INVALID_RESET_TOKEN" });
+    }
+
+    const passwordHash = await bcrypt.hash(parsed.newPassword, 12);
+    await updateUserPasswordById({
+      userId: user.id,
+      passwordHash,
+    });
+
+    return res.status(200).json({ ok: true, message: "Password updated successfully." });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      await logAuthRejection(req, {
+        reasonCode: "RESET_PASSWORD_VALIDATION_FAILED",
+        payload: { issues: error.issues.map((issue) => issue.path.join(".") || issue.code) },
+      });
+    }
+    return res.status(400).json({
+      ok: false,
+      code: "RESET_PASSWORD_FAILED",
+      message: "Unable to reset password.",
     });
   }
 });
