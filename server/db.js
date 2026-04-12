@@ -152,27 +152,6 @@ export async function createPasswordResetToken({ userId, tokenHash, expiresAt })
   return result.rows[0] ?? null;
 }
 
-export async function consumePasswordResetToken({ userId, tokenHash }) {
-  const result = await pool.query(
-    `UPDATE password_reset_tokens
-     SET used_at = NOW()
-     WHERE id = (
-       SELECT id
-       FROM password_reset_tokens
-       WHERE user_id = $1
-         AND token_hash = $2
-         AND used_at IS NULL
-         AND expires_at > NOW()
-       ORDER BY created_at DESC
-       LIMIT 1
-     )
-     RETURNING id`,
-    [userId, tokenHash],
-  );
-
-  return result.rowCount > 0;
-}
-
 export async function updateUserPasswordById({ userId, passwordHash }) {
   const result = await pool.query(
     `UPDATE app_users
