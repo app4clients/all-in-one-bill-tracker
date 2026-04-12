@@ -129,6 +129,63 @@ export async function getUserById(userId) {
   return result.rows[0] ?? null;
 }
 
+export async function getUserByEmail(emailNormalized) {
+  const result = await pool.query(
+    `SELECT id, email, email_normalized
+     FROM app_users
+     WHERE email_normalized = $1
+     LIMIT 1`,
+    [emailNormalized],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function createPasswordResetToken({ userId, tokenHash, expiresAt }) {
+  const result = await pool.query(
+    `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+     VALUES ($1, $2, $3)
+     RETURNING id`,
+    [userId, tokenHash, expiresAt],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function consumePasswordResetToken({ userId, tokenHash }) {
+  const result = await pool.query(
+    `UPDATE password_reset_tokens
+     SET used_at = NOW()
+     WHERE id = (
+       SELECT id
+       FROM password_reset_tokens
+       WHERE user_id = $1
+         AND token_hash = $2
+         AND used_at IS NULL
+         AND expires_at > NOW()
+       ORDER BY created_at DESC
+       LIMIT 1
+     )
+     RETURNING id`,
+    [userId, tokenHash],
+  );
+
+  return result.rowCount > 0;
+}
+
+export async function updateUserPasswordById({ userId, passwordHash }) {
+  const result = await pool.query(
+    `UPDATE app_users
+     SET password_hash = $2,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING id`,
+    [userId, passwordHash],
+  );
+
+  return result.rowCount > 0;
+}
+
 export async function saveAuthRejectionEvent({
   endpoint,
   reasonCode,
