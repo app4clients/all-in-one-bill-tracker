@@ -4,6 +4,7 @@ import express from "express";
 import jwt from "jsonwebtoken";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
+import { Resend } from "resend";
 import { z } from "zod";
 import {
   authenticateByUsernamePassword,
@@ -57,17 +58,33 @@ const forgotPasswordSchema = z.object({
   email: z.string().trim().email().max(150),
 });
 
-const resetPasswordSchema = z.object({
-  email: z.string().trim().email().max(150),
-  resetToken: z.string().trim().min(8).max(128),
-  newPassword: z.string().min(8).max(72),
-});
+const resetPasswordSchema = z
+  .object({
+    email: z.string().trim().email().max(150),
+    resetToken: z.string().trim().min(8).max(128).optional(),
+    resetCode: z.string().trim().min(8).max(128).optional(),
+    newPassword: z.string().min(8).max(72),
+  })
+  .refine((value) => Boolean(value.resetToken || value.resetCode), {
+    message: "resetToken or resetCode is required",
+    path: ["resetToken"],
+  })
+  .transform((value) => ({
+    email: value.email,
+    // Support both keys so mobile/web clients can send either name.
+    resetToken: value.resetToken ?? value.resetCode,
+    newPassword: value.newPassword,
+  }));
 
 const USERNAME_REGEX = /^[a-zA-Z0-9._-]{3,24}$/;
 const PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
 const DEFAULT_BLOCKED_USERNAME_WORDS = ["sex", "porn", "xxx", "nude", "adult", "escort", "camgirl", "onlyfans"];
 const PASSWORD_RESET_TTL_MINUTES = Number(process.env.AUTH_PASSWORD_RESET_TTL_MINUTES ?? 15);
 const EXPOSE_RESET_TOKEN = process.env.AUTH_EXPOSE_RESET_TOKEN === "true";
+const RESEND_API_KEY = process.env.RESEND_API_KEY?.trim();
+const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL?.trim();
+const APP_DISPLAY_NAME = process.env.APP_DISPLAY_NAME?.trim() || "All-in-One Bill Tracker";
+const resendClient = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
 function parseBlockedWords(raw) {
   if (!raw) {
@@ -142,6 +159,44 @@ function normalizeEmail(email) {
 
 function hashResetToken(resetToken) {
   return createHash("sha256").update(resetToken).digest("hex");
+}
+
+async function sendPasswordResetEmail({ toEmail, resetToken, expiresInMinutes }) {
+  // Skip delivery when provider is not configured; test mode can still expose token via API.
+  if (!resendClient || !RESEND_FROM_EMAIL) {
+    return false;
+  }
+
+  const subject = `${APP_DISPLAY_NAME} password reset code`;
+  const text = [
+    `You requested a password reset for ${APP_DISPLAY_NAME}.`,
+    "",
+    `Reset code: ${resetToken}`,
+    `This code expires in ${expiresInMinutes} minutes.`,
+    "",
+    "If you did not request this, you can ignore this email.",
+  ].join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#0f172a">
+      <h2 style="margin:0 0 12px">${APP_DISPLAY_NAME}</h2>
+      <p style="margin:0 0 10px">You requested a password reset.</p>
+      <p style="margin:0 0 10px">Use this code:</p>
+      <p style="font-size:22px;font-weight:700;letter-spacing:1px;margin:0 0 10px">${resetToken}</p>
+      <p style="margin:0 0 10px">This code expires in <strong>${expiresInMinutes} minutes</strong>.</p>
+      <p style="margin:0">If this was not you, ignore this email.</p>
+    </div>
+  `;
+
+  await resendClient.emails.send({
+    from: RESEND_FROM_EMAIL,
+    to: toEmail,
+    subject,
+    text,
+    html,
+  });
+
+  return true;
 }
 
 function normalizeForModeration(value) {
@@ -488,11 +543,25 @@ app.post("/api/auth/forgot-password", async (req, res) => {
       expiresAt,
     });
 
+    try {
+      await sendPasswordResetEmail({
+        toEmail: user.email,
+        resetToken,
+        expiresInMinutes: Math.max(5, PASSWORD_RESET_TTL_MINUTES),
+      });
+    } catch (emailError) {
+      await logAuthRejection(req, {
+        reasonCode: "FORGOT_PASSWORD_EMAIL_DELIVERY_FAILED",
+        email: parsed.email,
+        payload: { message: emailError instanceof Error ? emailError.message : "Email provider error" },
+      });
+    }
+
     const responsePayload = {
       ok: true,
       message: "If the email exists, reset instructions were generated.",
       expiresInMinutes: Math.max(5, PASSWORD_RESET_TTL_MINUTES),
-      ...(EXPOSE_RESET_TOKEN ? { resetToken } : {}),
+      ...(EXPOSE_RESET_TOKEN ? { resetToken, resetCode: resetToken } : {}),
     };
 
     return res.status(200).json(responsePayload);
