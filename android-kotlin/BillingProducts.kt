@@ -1,4 +1,4 @@
-package com.allinone.billtracker.billing
+package com.app4clients.allinonebilltracker.billing
 
 object BillingProducts {
     const val MONTHLY = "premium_monthly"

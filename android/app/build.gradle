@@ -1,11 +1,12 @@
+
 apply plugin: 'com.android.application'
 
 android {
-    namespace "com.allinone.billtracker"
+    namespace "com.app4clients.allinonebilltracker"
     compileSdk rootProject.ext.compileSdkVersion
 
     defaultConfig {
-        applicationId "com.allinone.billtracker"
+        applicationId "com.app4clients.allinonebilltracker"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

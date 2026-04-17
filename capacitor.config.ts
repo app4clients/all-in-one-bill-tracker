@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
-  appId: "com.allinone.billtracker",
+  appId: "com.app4clients.allinonebilltracker",
   appName: "All-in-One Bill Tracker",
   webDir: "dist",
   server: {

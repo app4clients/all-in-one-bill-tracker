@@ -1,4 +1,4 @@
-package com.allinone.billtracker.billing
+package com.app4clients.allinonebilltracker.billing
 
 import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow

@@ -14,6 +14,7 @@ type EntitlementState = {
 };
 
 type AuthMode = "login" | "signup";
+type ForgotPasswordStep = "request" | "reset";
 
 type AuthUser = {
   appUserId: string;
@@ -21,6 +22,16 @@ type AuthUser = {
   phoneNumber: string;
   username: string;
   email: string;
+  emailVerifiedAt?: string | null;
+  tokenVersion?: number;
+};
+
+type NotificationEntry = {
+  id: string;
+  title: string;
+  detail: string;
+  type: "reminder" | "security" | "insight" | "system";
+  createdAt: string;
 };
 
 type PhoneCountryOption = {
@@ -42,6 +53,7 @@ type BillItem = {
   type: ItemType;
   repeat: "monthly";
   lastPaidAt?: string;
+  snoozedUntil?: string;
   createdAt: string;
 };
 
@@ -61,11 +73,14 @@ const STORAGE_KEYS = {
   sentReminderMap: "bill-tracker-sent-reminder-map",
   sentDueDaySoundMap: "bill-tracker-sent-due-day-sound-map",
   dueDaySoundEnabled: "bill-tracker-due-day-sound-enabled",
+  notificationCenter: "bill-tracker-notification-center",
 };
 
-const FREE_ITEM_LIMIT = 10;
+const FREE_ITEM_LIMIT = 8;
+const FREE_CATEGORY_LIMIT = 3;
 const BILLING_BACKEND_URL = (import.meta.env.VITE_BILLING_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 const AUTH_API_BASE_URL = (import.meta.env.VITE_AUTH_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
+const PLAY_SUBSCRIPTION_MANAGE_URL = "https://play.google.com/store/account/subscriptions";
 const RECOMMENDED_PRICES_MAD = {
   monthly: 19,
   yearly: 149,
@@ -231,6 +246,13 @@ function isPaidThisMonth(item: BillItem, now = new Date()) {
   return paid.getMonth() === now.getMonth() && paid.getFullYear() === now.getFullYear();
 }
 
+function isReminderSnoozed(item: BillItem, now = new Date()) {
+  if (!item.snoozedUntil) {
+    return false;
+  }
+  return new Date(item.snoozedUntil).getTime() > now.getTime();
+}
+
 function playPremiumDueSound() {
   if (!("AudioContext" in window)) {
     return;
@@ -265,6 +287,20 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [verificationInfo, setVerificationInfo] = useState("");
+  const [verificationSubmitting, setVerificationSubmitting] = useState(false);
+  const [forgotPasswordStep, setForgotPasswordStep] = useState<ForgotPasswordStep>("request");
+  const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
+  const [forgotPasswordSubmitting, setForgotPasswordSubmitting] = useState(false);
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState("");
+  const [forgotPasswordToken, setForgotPasswordToken] = useState("");
+  const [forgotPasswordNewPassword, setForgotPasswordNewPassword] = useState("");
+  const [forgotPasswordInfo, setForgotPasswordInfo] = useState("");
+  const [forgotPasswordResendAvailableAt, setForgotPasswordResendAvailableAt] = useState(0);
+  const [forgotPasswordNow, setForgotPasswordNow] = useState(() => Date.now());
+  const [forgotPasswordExpiresInMinutes, setForgotPasswordExpiresInMinutes] = useState<number | null>(null);
   const [blockedUsernameWords, setBlockedUsernameWords] = useState<string[]>(DEFAULT_BLOCKED_USERNAME_WORDS);
   const [allowedUsernames, setAllowedUsernames] = useState<string[]>([]);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
@@ -298,6 +334,10 @@ export default function App() {
   const [inlineEditId, setInlineEditId] = useState<string | null>(null);
   const [inlineDraft, setInlineDraft] = useState<{ amount: string; dueDay: string }>({ amount: "", dueDay: "" });
   const [showPremiumPanel, setShowPremiumPanel] = useState(false);
+  const [showLegal, setShowLegal] = useState(false);
+  const [showDeleteAccountDialog, setShowDeleteAccountDialog] = useState(false);
+  const [deleteAccountConfirmInput, setDeleteAccountConfirmInput] = useState("");
+  const [notificationCenter, setNotificationCenter] = useState<NotificationEntry[]>([]);
   const [entitlement, setEntitlement] = useState<EntitlementState>({
     loading: true,
     premiumActive: false,
@@ -312,9 +352,9 @@ export default function App() {
   const [form, setForm] = useState<Template>({
     name: "",
     amount: 0,
-    dueDay: 1,
-    category: "General",
-    reminderDays: 2,
+    dueDay: 0,
+    category: "",
+    reminderDays: -1,
     type: "bill",
     repeat: "monthly",
   });
@@ -323,9 +363,9 @@ export default function App() {
     setForm({
       name: "",
       amount: 0,
-      dueDay: 1,
-      category: "General",
-      reminderDays: 2,
+      dueDay: 0,
+      category: "",
+      reminderDays: -1,
       type: "bill",
       repeat: "monthly",
     });
@@ -405,6 +445,26 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (authMode === "signup") {
+      setForgotPasswordOpen(false);
+      setForgotPasswordInfo("");
+      setForgotPasswordStep("request");
+      setForgotPasswordResendAvailableAt(0);
+      setForgotPasswordExpiresInMinutes(null);
+    }
+  }, [authMode]);
+
+  useEffect(() => {
+    if (!forgotPasswordOpen || forgotPasswordResendAvailableAt <= Date.now()) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setForgotPasswordNow(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [forgotPasswordOpen, forgotPasswordResendAvailableAt]);
+
+  useEffect(() => {
     if (!appUserId) {
       return;
     }
@@ -415,6 +475,7 @@ export default function App() {
     setFxUpdatedAt(readLS<string>(userScopedKey(STORAGE_KEYS.exchangeRatesUpdatedAt), ""));
     setBudget(readLS<number>(userScopedKey(STORAGE_KEYS.budget), 5000));
     setDueDaySoundEnabled(readLS<boolean>(userScopedKey(STORAGE_KEYS.dueDaySoundEnabled), true));
+    setNotificationCenter(readLS<NotificationEntry[]>(userScopedKey(STORAGE_KEYS.notificationCenter), []));
     const savedPin = localStorage.getItem(userScopedKey(STORAGE_KEYS.pin)) ?? "";
     setPin(savedPin);
     setLocked(Boolean(savedPin));
@@ -509,6 +570,13 @@ export default function App() {
     if (!appUserId) {
       return;
     }
+    localStorage.setItem(userScopedKey(STORAGE_KEYS.notificationCenter), JSON.stringify(notificationCenter.slice(0, 60)));
+  }, [notificationCenter, appUserId]);
+
+  useEffect(() => {
+    if (!appUserId) {
+      return;
+    }
     localStorage.setItem(userScopedKey(STORAGE_KEYS.exchangeRates), JSON.stringify(currencyToMAD));
   }, [currencyToMAD, appUserId]);
 
@@ -595,12 +663,66 @@ export default function App() {
       maximumFractionDigits: 2,
     }).format(fromMAD(amountMAD, currency, currencyToMAD));
 
+  const pushNotificationCenter = (entry: Omit<NotificationEntry, "id" | "createdAt">) => {
+    setNotificationCenter((prev) => [{ id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...entry }, ...prev].slice(0, 60));
+  };
+
+  useEffect(() => {
+    const apiBase = AUTH_API_BASE_URL;
+    if (!apiBase) {
+      return;
+    }
+
+    const postClientError = async (message: string, stack?: string, metadata?: Record<string, unknown>) => {
+      try {
+        const token = localStorage.getItem(STORAGE_KEYS.authToken) ?? "";
+        await fetch(`${apiBase}/api/client-errors`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            platform: "web",
+            message,
+            stack,
+            metadata,
+          }),
+        });
+      } catch {
+        // Avoid recursive error loops from telemetry.
+      }
+    };
+
+    const handleError = (event: ErrorEvent) => {
+      void postClientError(event.message || "Unhandled error", event.error?.stack, {
+        fileName: event.filename,
+        line: event.lineno,
+        column: event.colno,
+      });
+    };
+
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      void postClientError("Unhandled promise rejection", undefined, {
+        reason: String(event.reason ?? "Unknown reason"),
+      });
+    };
+
+    window.addEventListener("error", handleError);
+    window.addEventListener("unhandledrejection", handleRejection);
+    return () => {
+      window.removeEventListener("error", handleError);
+      window.removeEventListener("unhandledrejection", handleRejection);
+    };
+  }, []);
+
   const withDue = useMemo(() => {
     return items
       .map((item) => {
         const nextDueDate = getNextDueDate(item.dueDay);
         const daysUntil = getDaysUntil(nextDueDate);
-        return { ...item, nextDueDate, daysUntil, paid: isPaidThisMonth(item) };
+        const snoozed = isReminderSnoozed(item);
+        return { ...item, nextDueDate, daysUntil, paid: isPaidThisMonth(item), snoozed };
       })
       .sort((a, b) => a.nextDueDate.getTime() - b.nextDueDate.getTime());
   }, [items]);
@@ -616,14 +738,14 @@ export default function App() {
 
   const smartMessages = useMemo(() => {
     const messages: string[] = [];
-    const dueSoonItems = withDue.filter((item) => !item.paid && item.daysUntil >= 0 && item.daysUntil <= item.reminderDays);
+    const dueSoonItems = withDue.filter((item) => !item.paid && !item.snoozed && item.daysUntil >= 0 && item.daysUntil <= item.reminderDays);
 
     for (const item of dueSoonItems) {
       const label = item.daysUntil === 0 ? "today" : item.daysUntil === 1 ? "tomorrow" : `in ${item.daysUntil} days`;
       messages.push(`${item.name} is due ${label} (${formatMoney(item.amount)}).`);
     }
 
-    const renewTomorrowCount = withDue.filter((item) => item.type === "subscription" && item.daysUntil === 1 && !item.paid).length;
+    const renewTomorrowCount = withDue.filter((item) => item.type === "subscription" && item.daysUntil === 1 && !item.paid && !item.snoozed).length;
     if (renewTomorrowCount > 0) {
       messages.push(`${renewTomorrowCount} subscription${renewTomorrowCount > 1 ? "s" : ""} renew tomorrow.`);
     }
@@ -684,7 +806,7 @@ export default function App() {
     const sentMap = readLS<Record<string, boolean>>(userScopedKey(STORAGE_KEYS.sentReminderMap), {});
     let changed = false;
     withDue
-      .filter((item) => !item.paid && item.daysUntil >= 0 && item.daysUntil <= item.reminderDays)
+      .filter((item) => !item.paid && !item.snoozed && item.daysUntil >= 0 && item.daysUntil <= item.reminderDays)
       .forEach((item) => {
         const key = `${item.id}-${item.nextDueDate.toISOString().slice(0, 10)}`;
         if (!sentMap[key]) {
@@ -727,6 +849,7 @@ export default function App() {
 
   const canUsePremiumFeatures = entitlement.premiumActive;
   const freeItemsLeft = Math.max(0, FREE_ITEM_LIMIT - items.length);
+  const subscriptionExpired = Boolean(entitlement.expiresAt) && !entitlement.premiumActive && new Date(entitlement.expiresAt as string).getTime() <= Date.now();
 
   useEffect(() => {
     if (!canUsePremiumFeatures || !notifEnabled || !dueDaySoundEnabled) {
@@ -779,8 +902,40 @@ export default function App() {
   const onAddItem = (event: FormEvent) => {
     event.preventDefault();
     if (!form.name.trim() || form.amount <= 0) {
+      setToastMessage("Please fill name and amount.");
       return;
     }
+
+    const cleanedCategory = form.category.trim();
+    if (!cleanedCategory) {
+      setToastMessage("Please enter a category.");
+      return;
+    }
+
+    if (!Number.isInteger(form.dueDay) || form.dueDay < 1 || form.dueDay > 31) {
+      setToastMessage("Due day must be between 1 and 31.");
+      return;
+    }
+
+    if (!Number.isInteger(form.reminderDays) || form.reminderDays < 0 || form.reminderDays > 20) {
+      setToastMessage("Reminder days must be between 0 and 20.");
+      return;
+    }
+
+    const existingCategories = new Set(
+      items
+        .filter((item) => item.id !== editingItemId)
+        .map((item) => item.category.trim().toLowerCase())
+        .filter(Boolean),
+    );
+    const isNewCategory = !existingCategories.has(cleanedCategory.toLowerCase());
+
+    if (!entitlement.premiumActive && isNewCategory && existingCategories.size >= FREE_CATEGORY_LIMIT) {
+      setShowPremiumPanel(true);
+      setToastMessage(`Free plan supports up to ${FREE_CATEGORY_LIMIT} categories. Upgrade to Premium for unlimited categories.`);
+      return;
+    }
+
     if (!entitlement.premiumActive && !editingItemId && items.length >= FREE_ITEM_LIMIT) {
       setShowPremiumPanel(true);
       setToastMessage(`Free plan limit reached (${FREE_ITEM_LIMIT} items). Upgrade to Premium for unlimited items.`);
@@ -794,6 +949,7 @@ export default function App() {
                 ...item,
                 ...form,
                 name: form.name.trim(),
+                    category: cleanedCategory,
               }
             : item,
         ),
@@ -806,6 +962,7 @@ export default function App() {
       id: crypto.randomUUID(),
       ...form,
       name: form.name.trim(),
+      category: cleanedCategory,
       createdAt: new Date().toISOString(),
     };
     setItems((prev) => [nextItem, ...prev]);
@@ -814,7 +971,18 @@ export default function App() {
   };
 
   const saveTemplate = () => {
-    if (!form.name.trim()) {
+    if (
+      !form.name.trim() ||
+      form.amount <= 0 ||
+      !form.category.trim() ||
+      !Number.isInteger(form.dueDay) ||
+      form.dueDay < 1 ||
+      form.dueDay > 31 ||
+      !Number.isInteger(form.reminderDays) ||
+      form.reminderDays < 0 ||
+      form.reminderDays > 20
+    ) {
+      setToastMessage("Fill all Smart Add fields before saving a template.");
       return;
     }
     const exists = templates.find((template) => template.name.toLowerCase() === form.name.trim().toLowerCase());
@@ -826,7 +994,39 @@ export default function App() {
   };
 
   const markPaid = (id: string) => {
-    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, lastPaidAt: new Date().toISOString() } : item)));
+    const target = items.find((item) => item.id === id);
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              lastPaidAt: new Date().toISOString(),
+              snoozedUntil: undefined,
+            }
+          : item,
+      ),
+    );
+    if (target) {
+      pushNotificationCenter({
+        title: "Payment marked as paid",
+        detail: `${target.name} was marked as paid for this month.`,
+        type: "reminder",
+      });
+    }
+  };
+
+  const snoozeReminder = (id: string) => {
+    const snoozeUntil = new Date(Date.now() + DAY_MS).toISOString();
+    const target = items.find((item) => item.id === id);
+    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, snoozedUntil: snoozeUntil } : item)));
+    setToastMessage("Reminder snoozed for 1 day.");
+    if (target) {
+      pushNotificationCenter({
+        title: "Reminder snoozed",
+        detail: `${target.name} reminder was snoozed until ${new Date(snoozeUntil).toLocaleString()}.`,
+        type: "system",
+      });
+    }
   };
 
   const startEditItem = (id: string) => {
@@ -886,8 +1086,16 @@ export default function App() {
   };
 
   const removeItem = (id: string) => {
+    const target = items.find((item) => item.id === id);
     setItems((prev) => prev.filter((item) => item.id !== id));
     setToastMessage("Item deleted successfully.");
+    if (target) {
+      pushNotificationCenter({
+        title: "Item deleted",
+        detail: `${target.name} was removed from your tracker.`,
+        type: "system",
+      });
+    }
   };
 
   const requestNotifications = async () => {
@@ -1024,21 +1232,52 @@ export default function App() {
         token?: string;
         user?: AuthUser;
         code?: string;
+        message?: string;
+        requiresEmailVerification?: boolean;
+        verificationEmail?: string;
+        verificationCode?: string;
+        expiresInHours?: number;
+        retryAfterSeconds?: number;
       };
 
-      if (!response.ok || !data.ok || !data.token || !data.user) {
+      if (!response.ok || !data.ok) {
         if (data.code === "BLOCKED_USERNAME") {
           throw new Error("Username contains blocked words. Please choose a different username.");
         }
         if (data.code === "INVALID_EMAIL") {
           throw new Error("Email is invalid. Please enter a valid email address.");
         }
+        if (data.code === "EMAIL_NOT_VERIFIED") {
+          setVerificationEmail(data.verificationEmail?.trim() || authForm.email.trim());
+          setVerificationInfo("Please verify your email before logging in.");
+          throw new Error(data.message ?? "Please verify your email before logging in.");
+        }
+        if (data.code === "LOGIN_LOCKED") {
+          throw new Error(data.message ?? `Too many failed attempts. Try again in ${data.retryAfterSeconds ?? 0}s.`);
+        }
         throw new Error(data.code ?? "Authentication failed");
       }
 
-      localStorage.setItem(STORAGE_KEYS.authToken, data.token);
-      localStorage.setItem(STORAGE_KEYS.authUser, JSON.stringify(data.user));
-      setCurrentUser(data.user);
+      if (authMode === "signup") {
+        setVerificationEmail(authForm.email.trim());
+        setVerificationCode(data.verificationCode ?? "");
+        setVerificationInfo(
+          data.verificationCode
+            ? "Verification code generated. It has been auto-filled for testing."
+            : `Verification code sent to ${authForm.email.trim()}. Check inbox/spam and enter it below.`,
+        );
+        setAuthMode("login");
+        setAuthError("");
+        setToastMessage("Account created. Verify your email to continue.");
+      } else if (data.token && data.user) {
+        localStorage.setItem(STORAGE_KEYS.authToken, data.token);
+        localStorage.setItem(STORAGE_KEYS.authUser, JSON.stringify(data.user));
+        setCurrentUser(data.user);
+        setToastMessage("Welcome back.");
+      } else {
+        throw new Error("Authentication response missing token.");
+      }
+
       setAuthForm({
         fullName: "",
         username: "",
@@ -1048,11 +1287,351 @@ export default function App() {
       });
       setSelectedPhoneCountry("MA");
       setPhoneLocalNumber("");
-      setToastMessage(authMode === "signup" ? "Account created successfully." : "Welcome back.");
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Authentication failed");
     } finally {
       setAuthSubmitting(false);
+    }
+  };
+
+  const handleForgotPasswordRequest = async (isResend = false) => {
+    setAuthError("");
+    setForgotPasswordInfo("");
+
+    if (isResend && forgotPasswordResendAvailableAt > Date.now()) {
+      return;
+    }
+
+    if (!AUTH_API_BASE_URL) {
+      setAuthError("Set VITE_AUTH_API_BASE_URL to enable password reset.");
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(forgotPasswordEmail.trim())) {
+      setAuthError("Enter a valid email before requesting a reset code.");
+      return;
+    }
+
+    setForgotPasswordSubmitting(true);
+    try {
+      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/forgot-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: forgotPasswordEmail.trim() }),
+      });
+
+      const data = (await response.json()) as {
+        ok?: boolean;
+        message?: string;
+        resetToken?: string;
+        resetCode?: string;
+        expiresInMinutes?: number;
+      };
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message ?? "Unable to request password reset.");
+      }
+
+      const debugToken = data.resetCode ?? data.resetToken;
+      if (debugToken) {
+        setForgotPasswordToken(debugToken);
+      }
+      setForgotPasswordStep("reset");
+      setForgotPasswordExpiresInMinutes(typeof data.expiresInMinutes === "number" ? data.expiresInMinutes : null);
+      setForgotPasswordResendAvailableAt(Date.now() + 60 * 1000);
+      setForgotPasswordNow(Date.now());
+
+      if (debugToken) {
+        setForgotPasswordInfo(
+          "Reset code generated. It has been auto-filled for testing. Set a new password below.",
+        );
+      } else {
+        setForgotPasswordInfo(
+          `Reset code sent to ${forgotPasswordEmail.trim()}. Check inbox and spam, then enter the code below.`,
+        );
+      }
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to request password reset.");
+    } finally {
+      setForgotPasswordSubmitting(false);
+    }
+  };
+
+  const handleForgotPasswordReset = async (event: FormEvent) => {
+    event.preventDefault();
+    setAuthError("");
+    setForgotPasswordInfo("");
+
+    if (!AUTH_API_BASE_URL) {
+      setAuthError("Set VITE_AUTH_API_BASE_URL to enable password reset.");
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(forgotPasswordEmail.trim())) {
+      setAuthError("Enter the same valid email used during signup.");
+      return;
+    }
+
+    if (!forgotPasswordToken.trim() || forgotPasswordToken.trim().length < 8) {
+      setAuthError("Enter a valid reset code.");
+      return;
+    }
+
+    if (forgotPasswordNewPassword.length < 8) {
+      setAuthError("New password must be at least 8 characters.");
+      return;
+    }
+
+    setForgotPasswordSubmitting(true);
+    try {
+      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/reset-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: forgotPasswordEmail.trim(),
+          resetToken: forgotPasswordToken.trim(),
+          newPassword: forgotPasswordNewPassword,
+        }),
+      });
+
+      const data = (await response.json()) as {
+        ok?: boolean;
+        code?: string;
+        message?: string;
+      };
+
+      if (!response.ok || !data.ok) {
+        if (data.code === "INVALID_RESET_TOKEN") {
+          throw new Error("Reset code is invalid or expired.");
+        }
+        throw new Error(data.message ?? "Unable to reset password.");
+      }
+
+      setForgotPasswordInfo("Password updated. You can now log in with your new password.");
+      setForgotPasswordOpen(false);
+      setForgotPasswordStep("request");
+      setForgotPasswordToken("");
+      setForgotPasswordNewPassword("");
+      setForgotPasswordResendAvailableAt(0);
+      setForgotPasswordExpiresInMinutes(null);
+      setAuthMode("login");
+      setToastMessage("Password updated successfully.");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to reset password.");
+    } finally {
+      setForgotPasswordSubmitting(false);
+    }
+  };
+
+  const handleVerifyEmail = async (event: FormEvent) => {
+    event.preventDefault();
+    setAuthError("");
+    if (!AUTH_API_BASE_URL) {
+      setAuthError("Set VITE_AUTH_API_BASE_URL to verify email.");
+      return;
+    }
+    if (!EMAIL_REGEX.test(verificationEmail.trim())) {
+      setAuthError("Enter a valid verification email.");
+      return;
+    }
+    if (verificationCode.trim().length < 8) {
+      setAuthError("Enter a valid verification code.");
+      return;
+    }
+
+    setVerificationSubmitting(true);
+    try {
+      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/verify-email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: verificationEmail.trim(),
+          verificationCode: verificationCode.trim(),
+        }),
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        token?: string;
+        user?: AuthUser;
+        message?: string;
+      };
+      if (!response.ok || !data.ok || !data.token || !data.user) {
+        throw new Error(data.message ?? "Unable to verify email.");
+      }
+      localStorage.setItem(STORAGE_KEYS.authToken, data.token);
+      localStorage.setItem(STORAGE_KEYS.authUser, JSON.stringify(data.user));
+      setCurrentUser(data.user);
+      setVerificationEmail("");
+      setVerificationCode("");
+      setVerificationInfo("");
+      setToastMessage("Email verified successfully.");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to verify email.");
+    } finally {
+      setVerificationSubmitting(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    setAuthError("");
+    if (!AUTH_API_BASE_URL) {
+      setAuthError("Set VITE_AUTH_API_BASE_URL to resend verification.");
+      return;
+    }
+    if (!EMAIL_REGEX.test(verificationEmail.trim())) {
+      setAuthError("Enter a valid email first.");
+      return;
+    }
+    setVerificationSubmitting(true);
+    try {
+      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/resend-verification`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: verificationEmail.trim() }),
+      });
+      const data = (await response.json()) as { ok?: boolean; message?: string; verificationCode?: string };
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message ?? "Unable to resend verification code.");
+      }
+      if (data.verificationCode) {
+        setVerificationCode(data.verificationCode);
+      }
+      setVerificationInfo(data.verificationCode ? "Verification code refreshed and auto-filled for testing." : "Verification email sent. Check inbox/spam.");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to resend verification code.");
+    } finally {
+      setVerificationSubmitting(false);
+    }
+  };
+
+  const exportCsv = () => {
+    const headers = ["Name", "Type", "Category", "Amount_MAD", "DueDay", "ReminderDays", "PaidThisMonth", "LastPaidAt"];
+    const rows = items.map((item) => [
+      item.name,
+      item.type,
+      item.category,
+      item.amount.toFixed(2),
+      String(item.dueDay),
+      String(item.reminderDays),
+      isPaidThisMonth(item) ? "yes" : "no",
+      item.lastPaidAt ?? "",
+    ]);
+    const csv = [headers, ...rows]
+      .map((row) => row.map((col) => `"${String(col).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = "bill-tracker-export.csv";
+    a.click();
+    URL.revokeObjectURL(href);
+    setToastMessage("CSV export ready.");
+  };
+
+  const exportPdf = () => {
+    const reportWindow = window.open("", "_blank", "width=900,height=700");
+    if (!reportWindow) {
+      setToastMessage("Allow popups to export PDF.");
+      return;
+    }
+    const rows = items
+      .map(
+        (item) =>
+          `<tr><td>${item.name}</td><td>${item.type}</td><td>${item.category}</td><td>${formatMoney(item.amount)}</td><td>${item.dueDay}</td><td>${item.reminderDays}</td></tr>`,
+      )
+      .join("");
+    reportWindow.document.write(`
+      <html><head><title>Bill Tracker Report</title><style>
+      body{font-family:Arial;padding:24px;color:#111;} h1{margin:0 0 12px;} table{width:100%;border-collapse:collapse;} th,td{border:1px solid #ddd;padding:8px;text-align:left;} th{background:#f1f5f9;}
+      </style></head><body>
+      <h1>All-in-One Bill Tracker Report</h1>
+      <p>Generated at: ${new Date().toLocaleString()}</p>
+      <table><thead><tr><th>Name</th><th>Type</th><th>Category</th><th>Amount</th><th>Due day</th><th>Reminder days</th></tr></thead><tbody>${rows}</tbody></table>
+      </body></html>
+    `);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
+    setToastMessage("PDF print view opened.");
+  };
+
+  const handleLogoutAllDevices = async () => {
+    if (!AUTH_API_BASE_URL) {
+      setAuthError("Set VITE_AUTH_API_BASE_URL to manage sessions.");
+      return;
+    }
+    const token = localStorage.getItem(STORAGE_KEYS.authToken) ?? "";
+    if (!token) {
+      return;
+    }
+    try {
+      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/logout-all-devices`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const data = (await response.json()) as { ok?: boolean; message?: string };
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message ?? "Unable to logout all devices.");
+      }
+      handleLogout();
+      pushNotificationCenter({
+        title: "Session security",
+        detail: "You were logged out from all devices.",
+        type: "security",
+      });
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to logout all devices.");
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteAccountConfirmInput.trim().toLowerCase() !== currentUser?.username.toLowerCase()) {
+      setAuthError("Type your exact username to confirm account deletion.");
+      return;
+    }
+    if (!AUTH_API_BASE_URL) {
+      setAuthError("Set VITE_AUTH_API_BASE_URL to delete account.");
+      return;
+    }
+    const token = localStorage.getItem(STORAGE_KEYS.authToken) ?? "";
+    if (!token) {
+      return;
+    }
+    try {
+      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/account`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const data = (await response.json()) as { ok?: boolean; message?: string };
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message ?? "Unable to delete account.");
+      }
+      Object.values(STORAGE_KEYS).forEach((prefix) => {
+        Object.keys(localStorage)
+          .filter((key) => key.startsWith(prefix))
+          .forEach((key) => localStorage.removeItem(key));
+      });
+      localStorage.removeItem(STORAGE_KEYS.authToken);
+      localStorage.removeItem(STORAGE_KEYS.authUser);
+      setCurrentUser(null);
+      setShowDeleteAccountDialog(false);
+      setDeleteAccountConfirmInput("");
+      setToastMessage("Account deleted successfully.");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to delete account.");
     }
   };
 
@@ -1093,6 +1672,8 @@ export default function App() {
   }
 
   if (!currentUser) {
+    const resendSecondsLeft = Math.max(0, Math.ceil((forgotPasswordResendAvailableAt - forgotPasswordNow) / 1000));
+
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-slate-100">
         <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/90 p-6">
@@ -1188,6 +1769,111 @@ export default function App() {
               className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
             />
 
+            {authMode === "login" && (
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForgotPasswordOpen((prev) => !prev);
+                    setForgotPasswordInfo("");
+                    setAuthError("");
+                    setForgotPasswordStep("request");
+                    setForgotPasswordToken("");
+                    setForgotPasswordNewPassword("");
+                    setForgotPasswordResendAvailableAt(0);
+                    setForgotPasswordExpiresInMinutes(null);
+                    if (!forgotPasswordEmail && authForm.email) {
+                      setForgotPasswordEmail(authForm.email);
+                    }
+                  }}
+                  className="text-xs text-cyan-300"
+                >
+                  Forgot password?
+                </button>
+
+                {forgotPasswordOpen && (
+                  <div className="space-y-2 rounded-lg border border-slate-700 bg-slate-950/80 p-3">
+                    <p className="text-[11px] text-slate-400">
+                      Step 1: request code. Step 2: enter code + new password.
+                      {forgotPasswordExpiresInMinutes ? ` Code expires in ${forgotPasswordExpiresInMinutes} minutes.` : ""}
+                    </p>
+                    <p className="text-xs text-slate-300">
+                      {forgotPasswordStep === "request"
+                        ? "Enter your account email to request a reset code."
+                        : "Enter your reset code and a new password."}
+                    </p>
+                    <input
+                      type="email"
+                      value={forgotPasswordEmail}
+                      onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                      placeholder="Account email"
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+                    />
+
+                    {forgotPasswordStep === "request" ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                            void handleForgotPasswordRequest(false);
+                        }}
+                        disabled={forgotPasswordSubmitting}
+                        className="w-full rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300 disabled:opacity-60"
+                      >
+                        {forgotPasswordSubmitting ? "Requesting..." : "Request reset code"}
+                      </button>
+                    ) : (
+                      <form className="space-y-2" onSubmit={handleForgotPasswordReset}>
+                        <input
+                          value={forgotPasswordToken}
+                          onChange={(e) => setForgotPasswordToken(e.target.value)}
+                          placeholder="Reset code"
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+                        />
+                        <input
+                          type="password"
+                          value={forgotPasswordNewPassword}
+                          onChange={(e) => setForgotPasswordNewPassword(e.target.value)}
+                          placeholder="New password"
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+                        />
+                        <button
+                          type="submit"
+                          disabled={forgotPasswordSubmitting}
+                          className="w-full rounded-lg border border-emerald-500 px-3 py-2 text-sm text-emerald-300 disabled:opacity-60"
+                        >
+                          {forgotPasswordSubmitting ? "Updating..." : "Update password"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleForgotPasswordRequest(true);
+                          }}
+                          disabled={forgotPasswordSubmitting || resendSecondsLeft > 0}
+                          className="w-full rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300 disabled:opacity-60"
+                        >
+                          {resendSecondsLeft > 0 ? `Resend code in ${resendSecondsLeft}s` : "Resend code"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setForgotPasswordStep("request");
+                            setForgotPasswordToken("");
+                            setForgotPasswordNewPassword("");
+                            setForgotPasswordInfo("");
+                          }}
+                          className="w-full rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-300"
+                        >
+                          Back to request step
+                        </button>
+                      </form>
+                    )}
+
+                    {forgotPasswordInfo && <p className="text-xs text-emerald-300">{forgotPasswordInfo}</p>}
+                  </div>
+                )}
+              </div>
+            )}
+
             {authError && <p className="text-sm text-red-300">{authError}</p>}
 
             <button
@@ -1198,6 +1884,34 @@ export default function App() {
               {authSubmitting ? "Please wait..." : authMode === "signup" ? "Create account" : "Login"}
             </button>
           </form>
+
+          {verificationEmail && (
+            <form onSubmit={handleVerifyEmail} className="mt-4 space-y-2 rounded-lg border border-violet-600/40 bg-slate-950/70 p-3">
+              <p className="text-sm font-medium text-violet-300">Email verification required</p>
+              <p className="text-xs text-slate-300">Enter the verification code sent to {verificationEmail}.</p>
+              <input
+                value={verificationEmail}
+                onChange={(e) => setVerificationEmail(e.target.value)}
+                placeholder="Verification email"
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+              />
+              <input
+                value={verificationCode}
+                onChange={(e) => setVerificationCode(e.target.value)}
+                placeholder="Verification code"
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+              />
+              <div className="flex gap-2">
+                <button type="submit" disabled={verificationSubmitting} className="flex-1 rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300 disabled:opacity-60">
+                  {verificationSubmitting ? "Verifying..." : "Verify email"}
+                </button>
+                <button type="button" onClick={() => void handleResendVerification()} disabled={verificationSubmitting} className="flex-1 rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-200 disabled:opacity-60">
+                  Resend code
+                </button>
+              </div>
+              {verificationInfo && <p className="text-xs text-emerald-300">{verificationInfo}</p>}
+            </form>
+          )}
         </div>
       </div>
     );
@@ -1254,7 +1968,7 @@ export default function App() {
               <p className="text-sm text-slate-400">Track bills, avoid late fees, and protect your budget.</p>
               <p className="text-xs text-cyan-300">Hello {currentUser.username}</p>
               <p className="text-xs text-slate-500">
-                Plan: {canUsePremiumFeatures ? "Premium" : `Free (${freeItemsLeft} item${freeItemsLeft === 1 ? "" : "s"} left)`}
+                Plan: {canUsePremiumFeatures ? "Premium" : `Free (${freeItemsLeft} item${freeItemsLeft === 1 ? "" : "s"} left, ${FREE_CATEGORY_LIMIT} categories max)`}
               </p>
             </div>
           </div>
@@ -1343,11 +2057,32 @@ export default function App() {
           {fxUpdatedAt ? ` • updated ${new Date(fxUpdatedAt).toLocaleString()}` : ""}
         </p>
 
+        {subscriptionExpired && (
+          <section className="mb-4 rounded-xl border border-red-500/50 bg-red-950/30 p-4">
+            <p className="text-sm font-semibold text-red-200">Premium subscription expired</p>
+            <p className="mt-1 text-sm text-slate-300">Your premium access has expired. Renew to restore unlimited items, Backup/Restore, and Budget Guard.</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={() => setShowPremiumPanel(true)}
+                className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950"
+              >
+                Re-upgrade now
+              </button>
+              <button
+                onClick={() => window.open(PLAY_SUBSCRIPTION_MANAGE_URL, "_blank")}
+                className="rounded-lg border border-slate-600 px-3 py-2 text-sm"
+              >
+                Manage on Google Play
+              </button>
+            </div>
+          </section>
+        )}
+
         {showPremiumPanel && (
           <section className="mb-6 rounded-xl border border-amber-500/40 bg-slate-900 p-4">
             <h2 className="text-lg font-semibold text-amber-300">Passer a Premium</h2>
             <p className="mt-1 text-sm text-slate-300">
-              Free: up to {FREE_ITEM_LIMIT} items. Premium: unlimited items, Backup & Restore, and Budget Guard.
+              Free: up to {FREE_ITEM_LIMIT} items and {FREE_CATEGORY_LIMIT} categories. Premium: unlimited items/categories, Backup & Restore, and Budget Guard.
             </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <div className="rounded-lg border border-slate-700 bg-slate-950 p-3">
@@ -1389,6 +2124,32 @@ export default function App() {
           </section>
         )}
 
+        <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+          <h2 className="text-lg font-semibold">Subscription Status</h2>
+          <p className="mt-2 text-sm text-slate-300">
+            Status: {entitlement.loading ? "Checking" : canUsePremiumFeatures ? "Premium active" : "Free plan"}
+            {entitlement.productId ? ` • Plan ${entitlement.productId}` : ""}
+            {entitlement.expiresAt ? ` • Renewal ${new Date(entitlement.expiresAt).toLocaleDateString()}` : ""}
+          </p>
+          {entitlement.error && <p className="mt-1 text-xs text-red-300">{entitlement.error}</p>}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => window.open(PLAY_SUBSCRIPTION_MANAGE_URL, "_blank")}
+              className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300"
+            >
+              Manage on Google Play
+            </button>
+            {!canUsePremiumFeatures && (
+              <button
+                onClick={() => setShowPremiumPanel(true)}
+                className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950"
+              >
+                Upgrade to Premium
+              </button>
+            )}
+          </div>
+        </section>
+
         <section className="mb-6 grid gap-3 sm:grid-cols-3">
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
             <p className="text-xs uppercase tracking-wide text-slate-400">Monthly total</p>
@@ -1401,7 +2162,7 @@ export default function App() {
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
             <p className="text-xs uppercase tracking-wide text-slate-400">Upcoming in 7 days</p>
             <p className="text-2xl font-semibold text-amber-300">
-              {withDue.filter((item) => !item.paid && item.daysUntil >= 0 && item.daysUntil <= 7).length}
+              {withDue.filter((item) => !item.paid && !item.snoozed && item.daysUntil >= 0 && item.daysUntil <= 7).length}
             </p>
           </div>
         </section>
@@ -1441,17 +2202,20 @@ export default function App() {
                 type="number"
                 min={1}
                 max={31}
-                value={form.dueDay}
-                onChange={(e) => setForm((prev) => ({ ...prev, dueDay: Number(e.target.value || 1) }))}
+                value={form.dueDay > 0 ? form.dueDay : ""}
+                onChange={(e) => setForm((prev) => ({ ...prev, dueDay: Number(e.target.value || 0) }))}
                 placeholder="Due day"
                 className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
               />
               <input
                 value={form.category}
-                onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value || "General" }))}
+                onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
                 placeholder="Category"
                 className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
               />
+              {!canUsePremiumFeatures && (
+                <p className="text-xs text-amber-300">Free plan supports up to {FREE_CATEGORY_LIMIT} categories.</p>
+              )}
               <select
                 value={form.type}
                 onChange={(e) => setForm((prev) => ({ ...prev, type: e.target.value as ItemType }))}
@@ -1464,8 +2228,8 @@ export default function App() {
                 type="number"
                 min={0}
                 max={20}
-                value={form.reminderDays}
-                onChange={(e) => setForm((prev) => ({ ...prev, reminderDays: Number(e.target.value || 0) }))}
+                value={form.reminderDays >= 0 ? form.reminderDays : ""}
+                onChange={(e) => setForm((prev) => ({ ...prev, reminderDays: e.target.value === "" ? -1 : Number(e.target.value) }))}
                 placeholder="Reminder days"
                 className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
               />
@@ -1601,7 +2365,11 @@ export default function App() {
                     </p>
                   )}
                   <p className={`text-xs ${item.paid ? "text-emerald-400" : item.daysUntil <= 2 ? "text-red-400" : "text-slate-400"}`}>
-                    {item.paid ? "Paid this month" : `Due in ${item.daysUntil} day(s)`}
+                    {item.paid
+                      ? "Paid this month"
+                      : item.snoozed
+                        ? `Reminder snoozed until ${new Date(item.snoozedUntil as string).toLocaleDateString()}`
+                        : `Due in ${item.daysUntil} day(s)`}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -1625,6 +2393,11 @@ export default function App() {
                   {!item.paid && (
                     <button onClick={() => markPaid(item.id)} className="rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-slate-950">
                       Mark paid
+                    </button>
+                  )}
+                  {!item.paid && (
+                    <button onClick={() => snoozeReminder(item.id)} className="rounded-lg border border-amber-600 px-3 py-2 text-sm text-amber-300">
+                      Snooze 1 day
                     </button>
                   )}
                   <button onClick={() => removeItem(item.id)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-red-300">
@@ -1681,7 +2454,7 @@ export default function App() {
                   <div key={item.id} className="flex justify-between rounded-lg border border-slate-800 bg-slate-950 p-2">
                     <span>{item.name}</span>
                     <span className="text-slate-300">
-                      {item.nextDueDate.toLocaleDateString()} · {formatMoney(item.amount)}
+                      {item.nextDueDate.toLocaleDateString()} · {formatMoney(item.amount)}{item.snoozed ? " · snoozed" : ""}
                     </span>
                   </div>
                 ))}
@@ -1735,14 +2508,100 @@ export default function App() {
                         }}
                       />
                     </label>
+                    <button onClick={exportCsv} className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200">
+                      Export CSV
+                    </button>
+                    <button onClick={exportPdf} className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200">
+                      Export PDF
+                    </button>
                   </div>
                 ) : (
                   <p className="mt-2 text-xs text-slate-400">Available on Premium only.</p>
                 )}
               </div>
+
+              <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                <p className="text-sm text-slate-300">Session & Account</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button onClick={() => void handleLogoutAllDevices()} className="rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-200">
+                    Log out from all devices
+                  </button>
+                  <button onClick={() => setShowLegal(true)} className="rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-200">
+                    Privacy & Terms
+                  </button>
+                  <button onClick={() => setShowDeleteAccountDialog(true)} className="rounded-lg border border-red-500 px-3 py-2 text-sm text-red-300">
+                    Delete account
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-slate-400">Deleting account removes your cloud profile permanently. Local data is wiped on this device during deletion.</p>
+              </div>
             </div>
           </div>
         </section>
+
+        {showDeleteAccountDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
+            <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-4">
+              <h3 className="text-lg font-semibold text-red-300">Delete account permanently</h3>
+              <p className="mt-2 text-sm text-slate-300">
+                This will permanently delete your cloud account and cannot be undone. Type your username (<span className="font-semibold">{currentUser.username}</span>) to confirm.
+              </p>
+              <input
+                value={deleteAccountConfirmInput}
+                onChange={(e) => setDeleteAccountConfirmInput(e.target.value)}
+                placeholder="Type your username"
+                className="mt-3 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+              />
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={() => void handleDeleteAccount()}
+                  className="rounded-lg border border-red-500 px-3 py-2 text-sm text-red-300"
+                >
+                  Confirm delete
+                </button>
+                <button
+                  onClick={() => {
+                    setShowDeleteAccountDialog(false);
+                    setDeleteAccountConfirmInput("");
+                  }}
+                  className="rounded-lg border border-slate-600 px-3 py-2 text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showLegal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
+            <div className="w-full max-w-2xl rounded-xl border border-slate-700 bg-slate-900 p-4">
+              <h3 className="text-lg font-semibold">Privacy & Terms</h3>
+              <div className="mt-3 space-y-3 text-sm text-slate-300">
+                <p>
+                  Privacy: account and subscription data is stored securely on our backend. Billing validation is handled server-side and premium is never enabled by client only.
+                </p>
+                <p>
+                  Data deletion: deleting account removes cloud profile and linked entitlement records. Local app data on this device is cleared during deletion.
+                </p>
+                <p>
+                  Terms: subscription purchases are managed by Google Play policies and billing terms. You can manage or cancel in Google Play subscription settings.
+                </p>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  onClick={() => window.open(PLAY_SUBSCRIPTION_MANAGE_URL, "_blank")}
+                  className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300"
+                >
+                  Open Google Play Subscriptions
+                </button>
+                <button onClick={() => setShowLegal(false)} className="rounded-lg border border-slate-600 px-3 py-2 text-sm">
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

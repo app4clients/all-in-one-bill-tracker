@@ -7,6 +7,12 @@ CREATE TABLE IF NOT EXISTS app_users (
   email TEXT,
   email_normalized TEXT,
   password_hash TEXT,
+  email_verified_at TIMESTAMPTZ,
+  email_verification_token_hash TEXT,
+  email_verification_expires_at TIMESTAMPTZ,
+  token_version INT NOT NULL DEFAULT 0,
+  failed_login_attempts INT NOT NULL DEFAULT 0,
+  login_locked_until TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -18,6 +24,12 @@ ALTER TABLE app_users ADD COLUMN IF NOT EXISTS username_normalized TEXT;
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email TEXT;
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email_normalized TEXT;
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email_verification_token_hash TEXT;
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTAMPTZ;
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 0;
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS failed_login_attempts INT NOT NULL DEFAULT 0;
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ;
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_app_users_username_normalized
@@ -88,3 +100,29 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 
 CREATE INDEX IF NOT EXISTS idx_password_reset_user_id ON password_reset_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_password_reset_token_hash ON password_reset_tokens(token_hash);
+
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+  id BIGSERIAL PRIMARY KEY,
+  email_normalized TEXT NOT NULL,
+  ip_address TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_requests_email_created
+  ON password_reset_requests(email_normalized, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_requests_ip_created
+  ON password_reset_requests(ip_address, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS client_error_events (
+  id BIGSERIAL PRIMARY KEY,
+  user_id TEXT,
+  platform TEXT,
+  message TEXT NOT NULL,
+  stack TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_errors_created_at
+  ON client_error_events(created_at DESC);

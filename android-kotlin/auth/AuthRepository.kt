@@ -1,4 +1,4 @@
-package com.allinone.billtracker.auth
+package com.app4clients.allinonebilltracker.auth
 
 class AuthRepository(
     private val api: AuthApiService,

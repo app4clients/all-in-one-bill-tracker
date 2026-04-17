@@ -8,18 +8,28 @@ import { Resend } from "resend";
 import { z } from "zod";
 import {
   authenticateByUsernamePassword,
+  bumpUserTokenVersion,
+  clearFailedLoginAttempts,
+  consumeEmailVerificationToken,
+  countRecentPasswordResetRequests,
   consumePasswordResetToken,
   createPasswordResetToken,
+  createPasswordResetRequestLog,
+  deleteUserAccountById,
   ensureUser,
   getActiveEntitlement,
+  getLastPasswordResetRequest,
   getUserByEmail,
+  incrementFailedLoginAttempts,
   listAuthRejectionEvents,
   getSubscriptionByToken,
   getSubscriptionsByUser,
   getUserById,
   registerUserProfile,
+  saveClientErrorEvent,
   saveAuthRejectionEvent,
   saveBillingEvent,
+  setEmailVerificationToken,
   updateUserPasswordById,
   upsertSubscription,
 } from "./db.js";
@@ -76,11 +86,30 @@ const resetPasswordSchema = z
     newPassword: value.newPassword,
   }));
 
+const verifyEmailSchema = z.object({
+  email: z.string().trim().email().max(150),
+  verificationCode: z.string().trim().min(8).max(128),
+});
+
+const clientErrorSchema = z.object({
+  platform: z.string().trim().min(2).max(64),
+  message: z.string().trim().min(2).max(500),
+  stack: z.string().trim().max(4000).optional(),
+  metadata: z.record(z.any()).optional(),
+});
+
 const USERNAME_REGEX = /^[a-zA-Z0-9._-]{3,24}$/;
 const PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
 const DEFAULT_BLOCKED_USERNAME_WORDS = ["sex", "porn", "xxx", "nude", "adult", "escort", "camgirl", "onlyfans"];
 const PASSWORD_RESET_TTL_MINUTES = Number(process.env.AUTH_PASSWORD_RESET_TTL_MINUTES ?? 15);
 const EXPOSE_RESET_TOKEN = process.env.AUTH_EXPOSE_RESET_TOKEN === "true";
+const EMAIL_VERIFICATION_TTL_HOURS = Number(process.env.AUTH_EMAIL_VERIFICATION_TTL_HOURS ?? 24);
+const EXPOSE_EMAIL_VERIFICATION_CODE = process.env.AUTH_EXPOSE_EMAIL_VERIFICATION_CODE === "true";
+const RESET_RESEND_COOLDOWN_SECONDS = Number(process.env.AUTH_RESET_RESEND_COOLDOWN_SECONDS ?? 60);
+const RESET_RATE_LIMIT_WINDOW_MINUTES = Number(process.env.AUTH_RESET_RATE_LIMIT_WINDOW_MINUTES ?? 15);
+const RESET_RATE_LIMIT_MAX_REQUESTS = Number(process.env.AUTH_RESET_RATE_LIMIT_MAX_REQUESTS ?? 5);
+const LOGIN_MAX_FAILED_ATTEMPTS = Number(process.env.AUTH_LOGIN_MAX_FAILED_ATTEMPTS ?? 5);
+const LOGIN_LOCK_MINUTES = Number(process.env.AUTH_LOGIN_LOCK_MINUTES ?? 15);
 const RESEND_API_KEY = process.env.RESEND_API_KEY?.trim();
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL?.trim();
 const APP_DISPLAY_NAME = process.env.APP_DISPLAY_NAME?.trim() || "All-in-One Bill Tracker";
@@ -199,6 +228,43 @@ async function sendPasswordResetEmail({ toEmail, resetToken, expiresInMinutes })
   return true;
 }
 
+async function sendEmailVerificationCode({ toEmail, verificationCode, expiresInHours }) {
+  if (!resendClient || !RESEND_FROM_EMAIL) {
+    return false;
+  }
+
+  const subject = `${APP_DISPLAY_NAME} email verification code`;
+  const text = [
+    `Welcome to ${APP_DISPLAY_NAME}.`,
+    "",
+    `Verification code: ${verificationCode}`,
+    `This code expires in ${expiresInHours} hours.`,
+    "",
+    "If you did not create this account, you can ignore this email.",
+  ].join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#0f172a">
+      <h2 style="margin:0 0 12px">${APP_DISPLAY_NAME}</h2>
+      <p style="margin:0 0 10px">Confirm your email to secure your account.</p>
+      <p style="margin:0 0 10px">Verification code:</p>
+      <p style="font-size:22px;font-weight:700;letter-spacing:1px;margin:0 0 10px">${verificationCode}</p>
+      <p style="margin:0 0 10px">Code expires in <strong>${expiresInHours} hours</strong>.</p>
+      <p style="margin:0">If this wasn't you, ignore this email.</p>
+    </div>
+  `;
+
+  await resendClient.emails.send({
+    from: RESEND_FROM_EMAIL,
+    to: toEmail,
+    subject,
+    text,
+    html,
+  });
+
+  return true;
+}
+
 function normalizeForModeration(value) {
   return value
     .toLowerCase()
@@ -231,7 +297,7 @@ function signAuthToken(payload) {
   });
 }
 
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
   const auth = req.header("authorization");
   if (!auth?.startsWith("Bearer ")) {
     return res.status(401).json({ ok: false, code: "UNAUTHORIZED" });
@@ -245,6 +311,15 @@ function authMiddleware(req, res, next) {
 
   try {
     const payload = jwt.verify(token, secret);
+    const user = await getUserById(payload?.appUserId);
+    if (!user) {
+      return res.status(401).json({ ok: false, code: "INVALID_TOKEN" });
+    }
+
+    if ((payload?.tokenVersion ?? 0) !== (user.token_version ?? 0)) {
+      return res.status(401).json({ ok: false, code: "TOKEN_REVOKED" });
+    }
+
     req.auth = payload;
     return next();
   } catch {
@@ -402,20 +477,41 @@ app.post("/api/auth/signup", async (req, res) => {
       passwordHash,
     });
 
-    const token = signAuthToken({
-      appUserId: user.id,
-      username: user.username,
+    const verificationCode = randomBytes(24).toString("hex");
+    const verificationCodeHash = hashResetToken(verificationCode);
+    const verificationExpiresAt = new Date(Date.now() + Math.max(1, EMAIL_VERIFICATION_TTL_HOURS) * 60 * 60 * 1000);
+    await setEmailVerificationToken({
+      userId: user.id,
+      tokenHash: verificationCodeHash,
+      expiresAt: verificationExpiresAt,
     });
+
+    try {
+      await sendEmailVerificationCode({
+        toEmail: user.email,
+        verificationCode,
+        expiresInHours: Math.max(1, EMAIL_VERIFICATION_TTL_HOURS),
+      });
+    } catch (emailError) {
+      await logAuthRejection(req, {
+        reasonCode: "EMAIL_VERIFICATION_DELIVERY_FAILED",
+        email: user.email,
+        payload: { message: emailError instanceof Error ? emailError.message : "Email provider error" },
+      });
+    }
 
     return res.status(201).json({
       ok: true,
-      token,
+      requiresEmailVerification: true,
+      expiresInHours: Math.max(1, EMAIL_VERIFICATION_TTL_HOURS),
+      ...(EXPOSE_EMAIL_VERIFICATION_CODE ? { verificationCode } : {}),
       user: {
         appUserId: user.id,
         fullName: user.full_name,
         phoneNumber: user.phone_number,
         username: user.username,
         email: user.email,
+        emailVerifiedAt: user.email_verified_at ?? null,
       },
     });
   } catch (error) {
@@ -471,18 +567,61 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(401).json({ ok: false, code: "INVALID_CREDENTIALS" });
     }
 
+    if (user.login_locked_until && new Date(user.login_locked_until).getTime() > Date.now()) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((new Date(user.login_locked_until).getTime() - Date.now()) / 1000));
+      await logAuthRejection(req, {
+        reasonCode: "LOGIN_LOCKED",
+        username: parsed.username,
+        payload: { retryAfterSeconds },
+      });
+      return res.status(429).json({
+        ok: false,
+        code: "LOGIN_LOCKED",
+        retryAfterSeconds,
+        message: "Too many failed attempts. Please wait before retrying.",
+      });
+    }
+
     const passwordMatches = await bcrypt.compare(parsed.password, user.password_hash);
     if (!passwordMatches) {
+      const lockState = await incrementFailedLoginAttempts({
+        userId: user.id,
+        maxAttempts: Math.max(3, LOGIN_MAX_FAILED_ATTEMPTS),
+        lockMinutes: Math.max(1, LOGIN_LOCK_MINUTES),
+      });
       await logAuthRejection(req, {
         reasonCode: "INVALID_CREDENTIALS",
         username: parsed.username,
       });
-      return res.status(401).json({ ok: false, code: "INVALID_CREDENTIALS" });
+      const isLocked = Boolean(lockState?.login_locked_until && new Date(lockState.login_locked_until).getTime() > Date.now());
+      return res.status(isLocked ? 429 : 401).json({
+        ok: false,
+        code: isLocked ? "LOGIN_LOCKED" : "INVALID_CREDENTIALS",
+        message: isLocked ? "Too many failed attempts. Please wait before retrying." : "Invalid credentials",
+      });
+    }
+
+    await clearFailedLoginAttempts({ userId: user.id });
+
+    if (!user.email_verified_at) {
+      await logAuthRejection(req, {
+        reasonCode: "LOGIN_EMAIL_NOT_VERIFIED",
+        username: parsed.username,
+        email: user.email,
+      });
+      return res.status(403).json({
+        ok: false,
+        code: "EMAIL_NOT_VERIFIED",
+        message: "Please verify your email before logging in.",
+        requiresEmailVerification: true,
+        verificationEmail: user.email,
+      });
     }
 
     const token = signAuthToken({
       appUserId: user.id,
       username: user.username,
+      tokenVersion: user.token_version ?? 0,
     });
 
     return res.json({
@@ -494,6 +633,7 @@ app.post("/api/auth/login", async (req, res) => {
         phoneNumber: user.phone_number,
         username: user.username,
         email: user.email,
+        emailVerifiedAt: user.email_verified_at,
       },
     });
   } catch (error) {
@@ -516,10 +656,171 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
+app.post("/api/auth/verify-email", async (req, res) => {
+  try {
+    const parsed = verifyEmailSchema.parse(req.body);
+    const emailNormalized = normalizeEmail(parsed.email);
+    const tokenHash = hashResetToken(parsed.verificationCode);
+    const verifiedUser = await consumeEmailVerificationToken({
+      emailNormalized,
+      tokenHash,
+    });
+
+    if (!verifiedUser) {
+      await logAuthRejection(req, {
+        reasonCode: "EMAIL_VERIFICATION_INVALID_CODE",
+        email: parsed.email,
+      });
+      return res.status(400).json({
+        ok: false,
+        code: "INVALID_VERIFICATION_CODE",
+        message: "Verification code is invalid or expired.",
+      });
+    }
+
+    const token = signAuthToken({
+      appUserId: verifiedUser.id,
+      username: verifiedUser.username,
+      tokenVersion: verifiedUser.token_version ?? 0,
+    });
+
+    return res.status(200).json({
+      ok: true,
+      token,
+      user: {
+        appUserId: verifiedUser.id,
+        fullName: verifiedUser.full_name,
+        phoneNumber: verifiedUser.phone_number,
+        username: verifiedUser.username,
+        email: verifiedUser.email,
+        emailVerifiedAt: verifiedUser.email_verified_at,
+      },
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      await logAuthRejection(req, {
+        reasonCode: "EMAIL_VERIFICATION_VALIDATION_FAILED",
+        payload: { issues: error.issues.map((issue) => issue.path.join(".") || issue.code) },
+      });
+    }
+    return res.status(400).json({
+      ok: false,
+      code: "EMAIL_VERIFICATION_FAILED",
+      message: "Unable to verify email.",
+    });
+  }
+});
+
+app.post("/api/auth/resend-verification", async (req, res) => {
+  try {
+    const parsed = forgotPasswordSchema.parse(req.body);
+    const emailNormalized = normalizeEmail(parsed.email);
+    const user = await getUserByEmail(emailNormalized);
+
+    if (!user?.id || user.email_verified_at) {
+      return res.status(200).json({
+        ok: true,
+        message: "If the account exists, verification instructions were sent.",
+      });
+    }
+
+    const verificationCode = randomBytes(24).toString("hex");
+    const verificationCodeHash = hashResetToken(verificationCode);
+    const verificationExpiresAt = new Date(Date.now() + Math.max(1, EMAIL_VERIFICATION_TTL_HOURS) * 60 * 60 * 1000);
+    await setEmailVerificationToken({
+      userId: user.id,
+      tokenHash: verificationCodeHash,
+      expiresAt: verificationExpiresAt,
+    });
+
+    try {
+      await sendEmailVerificationCode({
+        toEmail: user.email,
+        verificationCode,
+        expiresInHours: Math.max(1, EMAIL_VERIFICATION_TTL_HOURS),
+      });
+    } catch (emailError) {
+      await logAuthRejection(req, {
+        reasonCode: "EMAIL_VERIFICATION_DELIVERY_FAILED",
+        email: user.email,
+        payload: { message: emailError instanceof Error ? emailError.message : "Email provider error" },
+      });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      message: "If the account exists, verification instructions were sent.",
+      ...(EXPOSE_EMAIL_VERIFICATION_CODE ? { verificationCode } : {}),
+    });
+  } catch {
+    return res.status(400).json({
+      ok: false,
+      code: "RESEND_VERIFICATION_FAILED",
+      message: "Unable to resend verification email.",
+    });
+  }
+});
+
 app.post("/api/auth/forgot-password", async (req, res) => {
   try {
     const parsed = forgotPasswordSchema.parse(req.body);
     const emailNormalized = normalizeEmail(parsed.email);
+    const ipAddress = extractClientIp(req);
+
+    const lastRequest = await getLastPasswordResetRequest({
+      emailNormalized,
+      ipAddress,
+    });
+
+    const cooldownSeconds = Math.max(15, RESET_RESEND_COOLDOWN_SECONDS);
+    if (lastRequest?.created_at) {
+      const elapsedSeconds = Math.floor((Date.now() - new Date(lastRequest.created_at).getTime()) / 1000);
+      const retryAfterSeconds = cooldownSeconds - elapsedSeconds;
+
+      if (retryAfterSeconds > 0) {
+        await logAuthRejection(req, {
+          reasonCode: "FORGOT_PASSWORD_COOLDOWN_ACTIVE",
+          email: parsed.email,
+          payload: { retryAfterSeconds },
+        });
+
+        return res.status(429).json({
+          ok: false,
+          code: "RESET_COOLDOWN_ACTIVE",
+          message: `Please wait ${retryAfterSeconds}s before requesting another code.`,
+          retryAfterSeconds,
+        });
+      }
+    }
+
+    const recentRequestCount = await countRecentPasswordResetRequests({
+      emailNormalized,
+      ipAddress,
+      windowMinutes: Math.max(5, RESET_RATE_LIMIT_WINDOW_MINUTES),
+    });
+
+    if (recentRequestCount >= Math.max(2, RESET_RATE_LIMIT_MAX_REQUESTS)) {
+      const retryAfterSeconds = Math.max(60, RESET_RATE_LIMIT_WINDOW_MINUTES * 60);
+
+      await logAuthRejection(req, {
+        reasonCode: "FORGOT_PASSWORD_RATE_LIMITED",
+        email: parsed.email,
+        payload: { recentRequestCount, windowMinutes: RESET_RATE_LIMIT_WINDOW_MINUTES },
+      });
+
+      return res.status(429).json({
+        ok: false,
+        code: "RESET_RATE_LIMITED",
+        message: "Too many reset requests. Please try again later.",
+        retryAfterSeconds,
+      });
+    }
+
+    await createPasswordResetRequestLog({
+      emailNormalized,
+      ipAddress,
+    });
+
     const user = await getUserByEmail(emailNormalized);
 
     if (!user?.id) {
@@ -649,6 +950,8 @@ app.get("/api/auth/me", authMiddleware, async (req, res) => {
         phoneNumber: user.phone_number,
         username: user.username,
         email: user.email,
+        emailVerifiedAt: user.email_verified_at,
+        tokenVersion: user.token_version ?? 0,
       },
     });
   } catch (error) {
@@ -657,6 +960,86 @@ app.get("/api/auth/me", authMiddleware, async (req, res) => {
       code: "AUTH_ME_FAILED",
       message: error instanceof Error ? error.message : "Unknown error",
     });
+  }
+});
+
+app.post("/api/auth/logout-all-devices", authMiddleware, async (req, res) => {
+  try {
+    const appUserId = req.auth?.appUserId;
+    if (!appUserId) {
+      return res.status(401).json({ ok: false, code: "INVALID_TOKEN" });
+    }
+
+    const nextTokenVersion = await bumpUserTokenVersion({ userId: appUserId });
+    return res.status(200).json({
+      ok: true,
+      tokenVersion: nextTokenVersion,
+      message: "Logged out from all devices.",
+    });
+  } catch (error) {
+    return res.status(400).json({
+      ok: false,
+      code: "LOGOUT_ALL_DEVICES_FAILED",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+app.delete("/api/auth/account", authMiddleware, async (req, res) => {
+  try {
+    const appUserId = req.auth?.appUserId;
+    if (!appUserId) {
+      return res.status(401).json({ ok: false, code: "INVALID_TOKEN" });
+    }
+
+    const deleted = await deleteUserAccountById({ userId: appUserId });
+    if (!deleted) {
+      return res.status(404).json({ ok: false, code: "USER_NOT_FOUND" });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      message: "Account deleted successfully.",
+    });
+  } catch (error) {
+    return res.status(400).json({
+      ok: false,
+      code: "DELETE_ACCOUNT_FAILED",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+app.post("/api/client-errors", async (req, res) => {
+  try {
+    const parsed = clientErrorSchema.parse(req.body);
+    const auth = req.header("authorization");
+    let appUserId = null;
+
+    if (auth?.startsWith("Bearer ")) {
+      const token = auth.slice("Bearer ".length).trim();
+      const secret = process.env.AUTH_JWT_SECRET;
+      if (secret) {
+        try {
+          const payload = jwt.verify(token, secret);
+          appUserId = payload?.appUserId ?? null;
+        } catch {
+          appUserId = null;
+        }
+      }
+    }
+
+    await saveClientErrorEvent({
+      userId: appUserId,
+      platform: parsed.platform,
+      message: parsed.message,
+      stack: parsed.stack,
+      metadata: parsed.metadata,
+    });
+
+    return res.status(200).json({ ok: true });
+  } catch {
+    return res.status(400).json({ ok: false, code: "CLIENT_ERROR_LOG_FAILED" });
   }
 });
 

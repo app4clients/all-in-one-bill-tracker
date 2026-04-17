@@ -1,4 +1,4 @@
-package com.allinone.billtracker;
+package com.app4clients.allinonebilltracker;
 
 import com.getcapacitor.BridgeActivity;
 

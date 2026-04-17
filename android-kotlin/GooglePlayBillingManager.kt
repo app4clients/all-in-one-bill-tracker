@@ -1,4 +1,4 @@
-package com.allinone.billtracker.billing
+package com.app4clients.allinonebilltracker.billing
 
 import android.app.Activity
 import com.android.billingclient.api.*

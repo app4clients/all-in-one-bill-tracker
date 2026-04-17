@@ -1,4 +1,4 @@
-package com.allinone.billtracker.billing
+package com.app4clients.allinonebilltracker.billing
 
 import retrofit2.http.Body
 import retrofit2.http.GET

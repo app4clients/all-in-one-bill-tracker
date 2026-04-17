@@ -1,4 +1,4 @@
-package com.allinone.billtracker.auth
+package com.app4clients.allinonebilltracker.auth
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

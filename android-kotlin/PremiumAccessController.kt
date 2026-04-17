@@ -1,4 +1,4 @@
-package com.allinone.billtracker.billing
+package com.app4clients.allinonebilltracker.billing
 
 object PremiumAccessController {
     const val FREE_ITEM_LIMIT = 10

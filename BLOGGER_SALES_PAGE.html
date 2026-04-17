@@ -1,0 +1,189 @@
+<style>
+  :root {
+    --bg: #030d2b;
+    --bg-soft: #08173f;
+    --primary: #1cc6f0;
+    --text: #eef5ff;
+    --muted: #b6c2dc;
+    --success: #2fd07d;
+  }
+
+  .aob-wrap {
+    font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    color: var(--text);
+    background: radial-gradient(circle at 20% 0%, #12337f 0%, var(--bg) 45%, #02081d 100%);
+    margin: 0;
+    padding: 0;
+  }
+
+  .aob-hero {
+    min-height: 88vh;
+    display: grid;
+    place-items: center;
+    padding: 48px 20px;
+    text-align: center;
+  }
+
+  .aob-inner {
+    width: min(900px, 100%);
+  }
+
+  .aob-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    margin-bottom: 24px;
+  }
+
+  .aob-brand img {
+    width: 54px;
+    height: 54px;
+    border-radius: 12px;
+    object-fit: cover;
+  }
+
+  .aob-title {
+    font-size: clamp(32px, 7vw, 62px);
+    line-height: 1.05;
+    margin: 0 0 16px;
+    font-weight: 800;
+  }
+
+  .aob-subtitle {
+    font-size: clamp(16px, 2.6vw, 22px);
+    color: var(--muted);
+    margin: 0 auto 30px;
+    max-width: 760px;
+    line-height: 1.6;
+  }
+
+  .aob-cta {
+    display: inline-flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+
+  .aob-btn {
+    border: 0;
+    border-radius: 12px;
+    padding: 14px 20px;
+    font-size: 16px;
+    font-weight: 700;
+    text-decoration: none;
+    display: inline-block;
+    transition: transform 0.15s ease, box-shadow 0.2s ease;
+  }
+
+  .aob-btn:hover {
+    transform: translateY(-1px);
+  }
+
+  .aob-btn-main {
+    background: var(--primary);
+    color: #001327;
+    box-shadow: 0 10px 30px rgba(28, 198, 240, 0.3);
+  }
+
+  .aob-btn-second {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid rgba(238, 245, 255, 0.28);
+  }
+
+  .aob-proof {
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  .aob-proof strong {
+    color: var(--success);
+  }
+
+  .aob-section {
+    padding: 60px 20px 72px;
+    background: linear-gradient(180deg, rgba(8, 23, 63, 0.1), rgba(8, 23, 63, 0.7));
+  }
+
+  .aob-grid {
+    width: min(980px, 100%);
+    margin: 0 auto;
+    display: grid;
+    gap: 16px;
+  }
+
+  .aob-item {
+    padding: 18px 16px;
+    border: 1px solid rgba(238, 245, 255, 0.17);
+    border-radius: 12px;
+    background: rgba(2, 10, 32, 0.55);
+  }
+
+  .aob-item h3 {
+    margin: 0 0 6px;
+    font-size: 18px;
+  }
+
+  .aob-item p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  .aob-note {
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+    margin-top: 26px;
+  }
+</style>
+
+<div class="aob-wrap">
+  <section class="aob-hero">
+    <div class="aob-inner">
+      <div class="aob-brand">
+        <img src="https://raw.githubusercontent.com/app4clients/all-in-one-bill-tracker/main/public/images/tracker-logo.png" alt="All-in-One Bill Tracker logo" />
+        <span>All-in-One Bill Tracker</span>
+      </div>
+
+      <h1 class="aob-title">Stop Losing Money on Late Bills and Hidden Subscriptions</h1>
+      <p class="aob-subtitle">
+        Track internet, rent, electricity, Netflix, gym, and more in one place. Get smart reminders before due dates, control your monthly budget, and upgrade to Premium for unlimited tracking and advanced protection.
+      </p>
+
+      <div class="aob-cta">
+        <a class="aob-btn aob-btn-main" href="https://play.google.com/store/apps/details?id=com.app4clients.allinonebilltracker" target="_blank" rel="noopener">Download on Google Play</a>
+        <a class="aob-btn aob-btn-second" href="#premium">See Premium Plans</a>
+      </div>
+
+      <p class="aob-proof">
+        Free plan includes <strong>8 items</strong> and core reminders.<br />
+        Premium unlocks unlimited items, backup/restore, and Budget Guard.
+      </p>
+    </div>
+  </section>
+
+  <section class="aob-section" id="premium">
+    <div class="aob-grid">
+      <article class="aob-item">
+        <h3>Free</h3>
+        <p>Up to 8 tracked items, smart due reminders, search and filters, multilingual interface.</p>
+      </article>
+      <article class="aob-item">
+        <h3>Premium Monthly - 19 MAD</h3>
+        <p>Unlimited items, backup and restore, full Budget Guard, no ad interruptions.</p>
+      </article>
+      <article class="aob-item">
+        <h3>Premium Yearly - 149 MAD</h3>
+        <p>Best value for long-term savings and full premium access all year.</p>
+      </article>
+    </div>
+    <p class="aob-note">Tip: Replace Play Store URL with your published listing URL when ready.</p>
+  </section>
+</div>

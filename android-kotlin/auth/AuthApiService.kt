@@ -1,4 +1,4 @@
-package com.allinone.billtracker.auth
+package com.app4clients.allinonebilltracker.auth
 
 import retrofit2.http.Body
 import retrofit2.http.GET

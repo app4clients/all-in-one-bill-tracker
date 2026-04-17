@@ -81,7 +81,7 @@ export async function registerUserProfile({
     }
 
     const updated = await client.query(
-      `UPDATE app_users
+       `UPDATE app_users
        SET full_name = $2,
            phone_number = $3,
            username = $4,
@@ -89,9 +89,14 @@ export async function registerUserProfile({
            email = $6,
            email_normalized = $7,
            password_hash = $8,
+            email_verified_at = NULL,
+            email_verification_token_hash = NULL,
+            email_verification_expires_at = NULL,
+            failed_login_attempts = 0,
+            login_locked_until = NULL,
            updated_at = NOW()
-       WHERE id = $1
-        RETURNING id, full_name, phone_number, username, email, created_at, updated_at`,
+        WHERE id = $1
+         RETURNING id, full_name, phone_number, username, email, email_verified_at, token_version, created_at, updated_at`,
       [appUserId, fullName, phoneNumber, username, usernameNormalized, email, emailNormalized, passwordHash],
     );
 
@@ -107,7 +112,8 @@ export async function registerUserProfile({
 
 export async function authenticateByUsernamePassword({ usernameNormalized }) {
   const result = await pool.query(
-    `SELECT id, full_name, phone_number, username, email, password_hash, created_at, updated_at
+    `SELECT id, full_name, phone_number, username, email, password_hash, email_verified_at,
+            token_version, failed_login_attempts, login_locked_until, created_at, updated_at
      FROM app_users
      WHERE username_normalized = $1
      LIMIT 1`,
@@ -119,7 +125,8 @@ export async function authenticateByUsernamePassword({ usernameNormalized }) {
 
 export async function getUserById(userId) {
   const result = await pool.query(
-    `SELECT id, full_name, phone_number, username, email, created_at, updated_at
+    `SELECT id, full_name, phone_number, username, email, email_verified_at,
+            token_version, failed_login_attempts, login_locked_until, created_at, updated_at
      FROM app_users
      WHERE id = $1
      LIMIT 1`,
@@ -131,7 +138,7 @@ export async function getUserById(userId) {
 
 export async function getUserByEmail(emailNormalized) {
   const result = await pool.query(
-    `SELECT id, email, email_normalized
+    `SELECT id, email, email_normalized, email_verified_at, token_version
      FROM app_users
      WHERE email_normalized = $1
      LIMIT 1`,
@@ -152,10 +159,70 @@ export async function createPasswordResetToken({ userId, tokenHash, expiresAt })
   return result.rows[0] ?? null;
 }
 
+export async function createPasswordResetRequestLog({ emailNormalized, ipAddress }) {
+  await pool.query(
+    `INSERT INTO password_reset_requests (email_normalized, ip_address)
+     VALUES ($1, $2)`,
+    [emailNormalized, ipAddress ?? null],
+  );
+}
+
+export async function getLastPasswordResetRequest({ emailNormalized, ipAddress }) {
+  const result = await pool.query(
+    `SELECT created_at
+     FROM password_reset_requests
+     WHERE email_normalized = $1
+        OR ($2::text IS NOT NULL AND ip_address = $2)
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [emailNormalized, ipAddress ?? null],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function countRecentPasswordResetRequests({ emailNormalized, ipAddress, windowMinutes }) {
+  const result = await pool.query(
+    `SELECT COUNT(*)::int AS count
+     FROM password_reset_requests
+     WHERE created_at >= NOW() - make_interval(mins => $3::int)
+       AND (
+         email_normalized = $1
+         OR ($2::text IS NOT NULL AND ip_address = $2)
+       )`,
+    [emailNormalized, ipAddress ?? null, windowMinutes],
+  );
+
+  return result.rows[0]?.count ?? 0;
+}
+
+export async function consumePasswordResetToken({ userId, tokenHash }) {
+  const result = await pool.query(
+    `UPDATE password_reset_tokens
+     SET used_at = NOW()
+     WHERE id = (
+       SELECT id
+       FROM password_reset_tokens
+       WHERE user_id = $1
+         AND token_hash = $2
+         AND used_at IS NULL
+         AND expires_at > NOW()
+       ORDER BY created_at DESC
+       LIMIT 1
+     )
+     RETURNING id`,
+    [userId, tokenHash],
+  );
+
+  return result.rowCount > 0;
+}
+
 export async function updateUserPasswordById({ userId, passwordHash }) {
   const result = await pool.query(
     `UPDATE app_users
      SET password_hash = $2,
+         failed_login_attempts = 0,
+         login_locked_until = NULL,
          updated_at = NOW()
      WHERE id = $1
      RETURNING id`,
@@ -163,6 +230,98 @@ export async function updateUserPasswordById({ userId, passwordHash }) {
   );
 
   return result.rowCount > 0;
+}
+
+export async function setEmailVerificationToken({ userId, tokenHash, expiresAt }) {
+  const result = await pool.query(
+    `UPDATE app_users
+     SET email_verification_token_hash = $2,
+         email_verification_expires_at = $3,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING id`,
+    [userId, tokenHash, expiresAt],
+  );
+
+  return result.rowCount > 0;
+}
+
+export async function consumeEmailVerificationToken({ emailNormalized, tokenHash }) {
+  const result = await pool.query(
+    `UPDATE app_users
+     SET email_verified_at = NOW(),
+         email_verification_token_hash = NULL,
+         email_verification_expires_at = NULL,
+         updated_at = NOW()
+     WHERE email_normalized = $1
+       AND email_verification_token_hash = $2
+       AND email_verification_expires_at IS NOT NULL
+       AND email_verification_expires_at > NOW()
+     RETURNING id, full_name, phone_number, username, email, email_verified_at, token_version, created_at, updated_at`,
+    [emailNormalized, tokenHash],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function incrementFailedLoginAttempts({ userId, maxAttempts, lockMinutes }) {
+  const result = await pool.query(
+    `UPDATE app_users
+     SET failed_login_attempts = failed_login_attempts + 1,
+         login_locked_until = CASE
+           WHEN failed_login_attempts + 1 >= $2 THEN NOW() + make_interval(mins => $3::int)
+           ELSE login_locked_until
+         END,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING failed_login_attempts, login_locked_until`,
+    [userId, maxAttempts, lockMinutes],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function clearFailedLoginAttempts({ userId }) {
+  await pool.query(
+    `UPDATE app_users
+     SET failed_login_attempts = 0,
+         login_locked_until = NULL,
+         updated_at = NOW()
+     WHERE id = $1`,
+    [userId],
+  );
+}
+
+export async function bumpUserTokenVersion({ userId }) {
+  const result = await pool.query(
+    `UPDATE app_users
+     SET token_version = token_version + 1,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING token_version`,
+    [userId],
+  );
+
+  return result.rows[0]?.token_version ?? null;
+}
+
+export async function deleteUserAccountById({ userId }) {
+  const result = await pool.query(
+    `DELETE FROM app_users
+     WHERE id = $1
+     RETURNING id`,
+    [userId],
+  );
+
+  return result.rowCount > 0;
+}
+
+export async function saveClientErrorEvent({ userId, platform, message, stack, metadata }) {
+  await pool.query(
+    `INSERT INTO client_error_events (user_id, platform, message, stack, metadata)
+     VALUES ($1, $2, $3, $4, $5::jsonb)`,
+    [userId ?? null, platform ?? null, message, stack ?? null, JSON.stringify(metadata ?? {})],
+  );
 }
 
 export async function saveAuthRejectionEvent({
@@ -335,25 +494,4 @@ export async function getActiveEntitlement(userId) {
   );
 
   return result.rows[0] ?? null;
-}
-
-export async function consumePasswordResetToken({ userId, tokenHash }) {
-  const result = await pool.query(
-    `UPDATE password_reset_tokens
-     SET used_at = NOW()
-     WHERE id = (
-       SELECT id
-       FROM password_reset_tokens
-       WHERE user_id = $1
-         AND token_hash = $2
-         AND used_at IS NULL
-         AND expires_at > NOW()
-       ORDER BY created_at DESC
-       LIMIT 1
-     )
-     RETURNING id`,
-    [userId, tokenHash]
-  );
-
-  return result.rowCount > 0;
 }
