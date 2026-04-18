@@ -49,7 +49,7 @@ try {
   console.error("Failed to prepare Google service account key file:", error);
 }
 app.use(cors());
-app.options("*", cors());
+
 app.use(express.json({ limit: "1mb" }));
 
 const PRODUCT_IDS = [
