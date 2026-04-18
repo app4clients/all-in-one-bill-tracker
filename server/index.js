@@ -1,3 +1,4 @@
+import { writeFileSync } from "fs";
 import "dotenv/config";
 import cors from "cors";
 import express from "express";
@@ -36,6 +37,17 @@ import {
 import { verifySubscriptionToken } from "./googlePlay.js";
 
 const app = express();
+const GOOGLE_KEY_TMP_PATH = "/tmp/gp-key.json";
+
+try {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH && process.env.GOOGLE_SERVICE_ACCOUNT_KEY_JSON) {
+    writeFileSync(GOOGLE_KEY_TMP_PATH, process.env.GOOGLE_SERVICE_ACCOUNT_KEY_JSON, { encoding: "utf8" });
+    process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH = GOOGLE_KEY_TMP_PATH;
+    console.log("Google service account key loaded from env JSON");
+  }
+} catch (error) {
+  console.error("Failed to prepare Google service account key file:", error);
+}
 app.use(cors());
 app.options("*", cors());
 app.use(express.json({ limit: "1mb" }));
