@@ -53,7 +53,6 @@ type BillItem = {
   type: ItemType;
   repeat: "monthly";
   lastPaidAt?: string;
-  snoozedUntil?: string;
   createdAt: string;
 };
 
@@ -246,13 +245,6 @@ function isPaidThisMonth(item: BillItem, now = new Date()) {
   return paid.getMonth() === now.getMonth() && paid.getFullYear() === now.getFullYear();
 }
 
-function isReminderSnoozed(item: BillItem, now = new Date()) {
-  if (!item.snoozedUntil) {
-    return false;
-  }
-  return new Date(item.snoozedUntil).getTime() > now.getTime();
-}
-
 function playPremiumDueSound() {
   if (!("AudioContext" in window)) {
     return;
@@ -281,6 +273,22 @@ function playPremiumDueSound() {
   }, 700);
 }
 
+function EyeToggleIcon({ visible }: { visible: boolean }) {
+  return visible ? (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true">
+      <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="2.6" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true">
+      <path d="M3 3l18 18" />
+      <path d="M10.6 6.3a10.8 10.8 0 0 1 1.4-.1c6.5 0 10 5.8 10 5.8a18.8 18.8 0 0 1-4 4.5" />
+      <path d="M6.8 6.9A18 18 0 0 0 2 12s3.5 5.8 10 5.8a11 11 0 0 0 5-.9" />
+      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+    </svg>
+  );
+}
+
 export default function App() {
   const [showWelcomeSplash, setShowWelcomeSplash] = useState(true);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
@@ -297,6 +305,11 @@ export default function App() {
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState("");
   const [forgotPasswordToken, setForgotPasswordToken] = useState("");
   const [forgotPasswordNewPassword, setForgotPasswordNewPassword] = useState("");
+  const [showForgotPasswordToken, setShowForgotPasswordToken] = useState(false);
+  const [showAuthPassword, setShowAuthPassword] = useState(false);
+  const [showForgotPasswordNewPassword, setShowForgotPasswordNewPassword] = useState(false);
+  const [showVerificationCode, setShowVerificationCode] = useState(false);
+  const [showPinInputValue, setShowPinInputValue] = useState(false);
   const [forgotPasswordInfo, setForgotPasswordInfo] = useState("");
   const [forgotPasswordResendAvailableAt, setForgotPasswordResendAvailableAt] = useState(0);
   const [forgotPasswordNow, setForgotPasswordNow] = useState(() => Date.now());
@@ -721,8 +734,7 @@ export default function App() {
       .map((item) => {
         const nextDueDate = getNextDueDate(item.dueDay);
         const daysUntil = getDaysUntil(nextDueDate);
-        const snoozed = isReminderSnoozed(item);
-        return { ...item, nextDueDate, daysUntil, paid: isPaidThisMonth(item), snoozed };
+        return { ...item, nextDueDate, daysUntil, paid: isPaidThisMonth(item) };
       })
       .sort((a, b) => a.nextDueDate.getTime() - b.nextDueDate.getTime());
   }, [items]);
@@ -738,14 +750,14 @@ export default function App() {
 
   const smartMessages = useMemo(() => {
     const messages: string[] = [];
-    const dueSoonItems = withDue.filter((item) => !item.paid && !item.snoozed && item.daysUntil >= 0 && item.daysUntil <= item.reminderDays);
+    const dueSoonItems = withDue.filter((item) => !item.paid && item.daysUntil >= 0 && item.daysUntil <= item.reminderDays);
 
     for (const item of dueSoonItems) {
       const label = item.daysUntil === 0 ? "today" : item.daysUntil === 1 ? "tomorrow" : `in ${item.daysUntil} days`;
       messages.push(`${item.name} is due ${label} (${formatMoney(item.amount)}).`);
     }
 
-    const renewTomorrowCount = withDue.filter((item) => item.type === "subscription" && item.daysUntil === 1 && !item.paid && !item.snoozed).length;
+    const renewTomorrowCount = withDue.filter((item) => item.type === "subscription" && item.daysUntil === 1 && !item.paid).length;
     if (renewTomorrowCount > 0) {
       messages.push(`${renewTomorrowCount} subscription${renewTomorrowCount > 1 ? "s" : ""} renew tomorrow.`);
     }
@@ -806,7 +818,7 @@ export default function App() {
     const sentMap = readLS<Record<string, boolean>>(userScopedKey(STORAGE_KEYS.sentReminderMap), {});
     let changed = false;
     withDue
-      .filter((item) => !item.paid && !item.snoozed && item.daysUntil >= 0 && item.daysUntil <= item.reminderDays)
+      .filter((item) => !item.paid && item.daysUntil >= 0 && item.daysUntil <= item.reminderDays)
       .forEach((item) => {
         const key = `${item.id}-${item.nextDueDate.toISOString().slice(0, 10)}`;
         if (!sentMap[key]) {
@@ -1001,7 +1013,6 @@ export default function App() {
           ? {
               ...item,
               lastPaidAt: new Date().toISOString(),
-              snoozedUntil: undefined,
             }
           : item,
       ),
@@ -1011,20 +1022,6 @@ export default function App() {
         title: "Payment marked as paid",
         detail: `${target.name} was marked as paid for this month.`,
         type: "reminder",
-      });
-    }
-  };
-
-  const snoozeReminder = (id: string) => {
-    const snoozeUntil = new Date(Date.now() + DAY_MS).toISOString();
-    const target = items.find((item) => item.id === id);
-    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, snoozedUntil: snoozeUntil } : item)));
-    setToastMessage("Reminder snoozed for 1 day.");
-    if (target) {
-      pushNotificationCenter({
-        title: "Reminder snoozed",
-        detail: `${target.name} reminder was snoozed until ${new Date(snoozeUntil).toLocaleString()}.`,
-        type: "system",
       });
     }
   };
@@ -1249,8 +1246,8 @@ export default function App() {
         }
         if (data.code === "EMAIL_NOT_VERIFIED") {
           setVerificationEmail(data.verificationEmail?.trim() || authForm.email.trim());
-          setVerificationInfo("Please verify your email before logging in.");
-          throw new Error(data.message ?? "Please verify your email before logging in.");
+          setVerificationInfo("Email not verified. Verify your email, then sign in again with your latest password.");
+          throw new Error(data.message ?? "Email not verified. Verify your email to continue.");
         }
         if (data.code === "LOGIN_LOCKED") {
           throw new Error(data.message ?? `Too many failed attempts. Try again in ${data.retryAfterSeconds ?? 0}s.`);
@@ -1411,7 +1408,17 @@ export default function App() {
         throw new Error(data.message ?? "Unable to reset password.");
       }
 
-      setForgotPasswordInfo("Password updated. You can now log in with your new password.");
+      // Force logout after password reset so old sessions cannot create confusion.
+      localStorage.removeItem(STORAGE_KEYS.authToken);
+      localStorage.removeItem(STORAGE_KEYS.authUser);
+      setCurrentUser(null);
+      setLocked(false);
+      setPinInput("");
+      setShowPremiumPanel(false);
+
+      const targetEmail = forgotPasswordEmail.trim();
+
+      setForgotPasswordInfo("Password updated. Verify your email before signing in.");
       setForgotPasswordOpen(false);
       setForgotPasswordStep("request");
       setForgotPasswordToken("");
@@ -1419,7 +1426,24 @@ export default function App() {
       setForgotPasswordResendAvailableAt(0);
       setForgotPasswordExpiresInMinutes(null);
       setAuthMode("login");
-      setToastMessage("Password updated successfully.");
+      setVerificationEmail(targetEmail);
+      setVerificationCode("");
+      setVerificationInfo("Password updated. Email not verified yet. Tap \"Send verification code now\" below.");
+      setAuthForm((prev) => ({ ...prev, password: "" }));
+      setToastMessage("Password updated. Verify your email to sign in.");
+
+      setVerificationSubmitting(true);
+      try {
+        await requestVerificationCode(targetEmail, "post_reset");
+      } catch (verificationError) {
+        setAuthError(
+          verificationError instanceof Error
+            ? verificationError.message
+            : "Password updated, but verification email could not be sent.",
+        );
+      } finally {
+        setVerificationSubmitting(false);
+      }
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Unable to reset password.");
     } finally {
@@ -1478,33 +1502,47 @@ export default function App() {
     }
   };
 
+  const requestVerificationCode = async (email: string, source: "manual" | "post_reset" = "manual") => {
+    if (!AUTH_API_BASE_URL) {
+      throw new Error("Set VITE_AUTH_API_BASE_URL to resend verification.");
+    }
+    if (!EMAIL_REGEX.test(email.trim())) {
+      throw new Error("Enter a valid email first.");
+    }
+
+    const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/resend-verification`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email: email.trim() }),
+    });
+    const data = (await response.json()) as { ok?: boolean; message?: string; verificationCode?: string };
+    if (!response.ok || !data.ok) {
+      throw new Error(data.message ?? "Unable to resend verification code.");
+    }
+
+    if (data.verificationCode) {
+      setVerificationCode(data.verificationCode);
+    }
+
+    if (source === "post_reset") {
+      setVerificationInfo(
+        data.verificationCode
+          ? "Password updated. Verification code sent and auto-filled for testing. Verify now, then sign in with your new password."
+          : "Password updated. Email not verified yet. Verification code sent now. Check inbox/spam, verify, then sign in with your new password.",
+      );
+      return;
+    }
+
+    setVerificationInfo(data.verificationCode ? "Verification code refreshed and auto-filled for testing." : "Verification email sent. Check inbox/spam.");
+  };
+
   const handleResendVerification = async () => {
     setAuthError("");
-    if (!AUTH_API_BASE_URL) {
-      setAuthError("Set VITE_AUTH_API_BASE_URL to resend verification.");
-      return;
-    }
-    if (!EMAIL_REGEX.test(verificationEmail.trim())) {
-      setAuthError("Enter a valid email first.");
-      return;
-    }
     setVerificationSubmitting(true);
     try {
-      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/resend-verification`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email: verificationEmail.trim() }),
-      });
-      const data = (await response.json()) as { ok?: boolean; message?: string; verificationCode?: string };
-      if (!response.ok || !data.ok) {
-        throw new Error(data.message ?? "Unable to resend verification code.");
-      }
-      if (data.verificationCode) {
-        setVerificationCode(data.verificationCode);
-      }
-      setVerificationInfo(data.verificationCode ? "Verification code refreshed and auto-filled for testing." : "Verification email sent. Check inbox/spam.");
+      await requestVerificationCode(verificationEmail, "manual");
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Unable to resend verification code.");
     } finally {
@@ -1761,13 +1799,24 @@ export default function App() {
               </>
             )}
 
-            <input
-              type="password"
-              value={authForm.password}
-              onChange={(e) => setAuthForm((prev) => ({ ...prev, password: e.target.value }))}
-              placeholder="Password"
-              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
-            />
+            <div className="relative">
+              <input
+                type={showAuthPassword ? "text" : "password"}
+                value={authForm.password}
+                onChange={(e) => setAuthForm((prev) => ({ ...prev, password: e.target.value }))}
+                placeholder="Password"
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 pr-12"
+              />
+              <button
+                type="button"
+                onClick={() => setShowAuthPassword((prev) => !prev)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-300 hover:text-slate-100"
+                aria-label={showAuthPassword ? "Hide password" : "Show password"}
+                title={showAuthPassword ? "Hide password" : "Show password"}
+              >
+                <EyeToggleIcon visible={showAuthPassword} />
+              </button>
+            </div>
 
             {authMode === "login" && (
               <div className="space-y-2">
@@ -1823,19 +1872,42 @@ export default function App() {
                       </button>
                     ) : (
                       <form className="space-y-2" onSubmit={handleForgotPasswordReset}>
-                        <input
-                          value={forgotPasswordToken}
-                          onChange={(e) => setForgotPasswordToken(e.target.value)}
-                          placeholder="Reset code"
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
-                        />
-                        <input
-                          type="password"
-                          value={forgotPasswordNewPassword}
-                          onChange={(e) => setForgotPasswordNewPassword(e.target.value)}
-                          placeholder="New password"
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
-                        />
+                        <div className="relative">
+                          <input
+                            type={showForgotPasswordToken ? "text" : "password"}
+                            value={forgotPasswordToken}
+                            onChange={(e) => setForgotPasswordToken(e.target.value)}
+                            placeholder="Reset code"
+                            className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 pr-12 text-sm"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowForgotPasswordToken((prev) => !prev)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-300 hover:text-slate-100"
+                            aria-label={showForgotPasswordToken ? "Hide reset code" : "Show reset code"}
+                            title={showForgotPasswordToken ? "Hide reset code" : "Show reset code"}
+                          >
+                            <EyeToggleIcon visible={showForgotPasswordToken} />
+                          </button>
+                        </div>
+                        <div className="relative">
+                          <input
+                            type={showForgotPasswordNewPassword ? "text" : "password"}
+                            value={forgotPasswordNewPassword}
+                            onChange={(e) => setForgotPasswordNewPassword(e.target.value)}
+                            placeholder="New password"
+                            className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 pr-12 text-sm"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowForgotPasswordNewPassword((prev) => !prev)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-300 hover:text-slate-100"
+                            aria-label={showForgotPasswordNewPassword ? "Hide new password" : "Show new password"}
+                            title={showForgotPasswordNewPassword ? "Hide new password" : "Show new password"}
+                          >
+                            <EyeToggleIcon visible={showForgotPasswordNewPassword} />
+                          </button>
+                        </div>
                         <button
                           type="submit"
                           disabled={forgotPasswordSubmitting}
@@ -1895,18 +1967,30 @@ export default function App() {
                 placeholder="Verification email"
                 className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
               />
-              <input
-                value={verificationCode}
-                onChange={(e) => setVerificationCode(e.target.value)}
-                placeholder="Verification code"
-                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
-              />
+              <div className="relative">
+                <input
+                  type={showVerificationCode ? "text" : "password"}
+                  value={verificationCode}
+                  onChange={(e) => setVerificationCode(e.target.value)}
+                  placeholder="Verification code"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 pr-12 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowVerificationCode((prev) => !prev)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-300 hover:text-slate-100"
+                  aria-label={showVerificationCode ? "Hide verification code" : "Show verification code"}
+                  title={showVerificationCode ? "Hide verification code" : "Show verification code"}
+                >
+                  <EyeToggleIcon visible={showVerificationCode} />
+                </button>
+              </div>
               <div className="flex gap-2">
                 <button type="submit" disabled={verificationSubmitting} className="flex-1 rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300 disabled:opacity-60">
                   {verificationSubmitting ? "Verifying..." : "Verify email"}
                 </button>
                 <button type="button" onClick={() => void handleResendVerification()} disabled={verificationSubmitting} className="flex-1 rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-200 disabled:opacity-60">
-                  Resend code
+                  Send verification code now
                 </button>
               </div>
               {verificationInfo && <p className="text-xs text-emerald-300">{verificationInfo}</p>}
@@ -1928,14 +2012,25 @@ export default function App() {
               <p className="text-sm text-slate-400">Enter your PIN to continue</p>
             </div>
           </div>
-          <input
-            type="password"
-            maxLength={8}
-            value={pinInput}
-            onChange={(e) => setPinInput(e.target.value)}
-            placeholder="PIN"
-            className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2"
-          />
+          <div className="relative">
+            <input
+              type={showPinInputValue ? "text" : "password"}
+              maxLength={8}
+              value={pinInput}
+              onChange={(e) => setPinInput(e.target.value)}
+              placeholder="PIN"
+              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 pr-12"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPinInputValue((prev) => !prev)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-300 hover:text-slate-100"
+              aria-label={showPinInputValue ? "Hide PIN" : "Show PIN"}
+              title={showPinInputValue ? "Hide PIN" : "Show PIN"}
+            >
+              <EyeToggleIcon visible={showPinInputValue} />
+            </button>
+          </div>
           <button
             onClick={() => {
               if (pinInput === pin) {
@@ -2162,7 +2257,7 @@ export default function App() {
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
             <p className="text-xs uppercase tracking-wide text-slate-400">Upcoming in 7 days</p>
             <p className="text-2xl font-semibold text-amber-300">
-              {withDue.filter((item) => !item.paid && !item.snoozed && item.daysUntil >= 0 && item.daysUntil <= 7).length}
+              {withDue.filter((item) => !item.paid && item.daysUntil >= 0 && item.daysUntil <= 7).length}
             </p>
           </div>
         </section>
@@ -2365,11 +2460,7 @@ export default function App() {
                     </p>
                   )}
                   <p className={`text-xs ${item.paid ? "text-emerald-400" : item.daysUntil <= 2 ? "text-red-400" : "text-slate-400"}`}>
-                    {item.paid
-                      ? "Paid this month"
-                      : item.snoozed
-                        ? `Reminder snoozed until ${new Date(item.snoozedUntil as string).toLocaleDateString()}`
-                        : `Due in ${item.daysUntil} day(s)`}
+                    {item.paid ? "Paid this month" : `Due in ${item.daysUntil} day(s)`}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -2393,11 +2484,6 @@ export default function App() {
                   {!item.paid && (
                     <button onClick={() => markPaid(item.id)} className="rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-slate-950">
                       Mark paid
-                    </button>
-                  )}
-                  {!item.paid && (
-                    <button onClick={() => snoozeReminder(item.id)} className="rounded-lg border border-amber-600 px-3 py-2 text-sm text-amber-300">
-                      Snooze 1 day
                     </button>
                   )}
                   <button onClick={() => removeItem(item.id)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-red-300">
@@ -2454,7 +2540,7 @@ export default function App() {
                   <div key={item.id} className="flex justify-between rounded-lg border border-slate-800 bg-slate-950 p-2">
                     <span>{item.name}</span>
                     <span className="text-slate-300">
-                      {item.nextDueDate.toLocaleDateString()} · {formatMoney(item.amount)}{item.snoozed ? " · snoozed" : ""}
+                      {item.nextDueDate.toLocaleDateString()} · {formatMoney(item.amount)}
                     </span>
                   </div>
                 ))}

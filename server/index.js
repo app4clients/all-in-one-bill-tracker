@@ -36,7 +36,8 @@ import {
 import { verifySubscriptionToken } from "./googlePlay.js";
 
 const app = express();
-app.use(cors({ origin: process.env.CORS_ORIGIN?.split(",") ?? "*" }));
+app.use(cors());
+app.options("*", cors());
 app.use(express.json({ limit: "1mb" }));
 
 const PRODUCT_IDS = [
