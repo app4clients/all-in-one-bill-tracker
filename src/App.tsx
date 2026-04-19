@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useCallback, FormEvent, useEffect, useMemo, useState } from "react";
 
 type ItemType = "bill" | "subscription";
 type StatusFilter = "all" | "dueSoon" | "paid" | "unpaid";
@@ -84,6 +84,13 @@ const RECOMMENDED_PRICES_MAD = {
   monthly: 19,
   yearly: 149,
 };
+
+const ANDROID_PACKAGE_NAME = "com.app4clients.allinonebilltracker";
+
+function openPlaySubscription(productId: "premium_monthly" | "premium_yearly") {
+  const url = `https://play.google.com/store/account/subscriptions?sku=${encodeURIComponent(productId)}&package=${encodeURIComponent(ANDROID_PACKAGE_NAME)}`;
+  window.open(url, "_blank");
+}
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const DEFAULT_BLOCKED_USERNAME_WORDS = ["sex", "porn", "xxx", "nude", "adult", "escort", "camgirl", "onlyfans"];
@@ -385,6 +392,17 @@ export default function App() {
     setEditingItemId(null);
   };
 
+useEffect(() => {
+  const onVisibilityChange = () => {
+    if (document.visibilityState === "visible") {
+      window.location.reload();
+    }
+  };
+
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+}, []);
+
   useEffect(() => {
     const bootstrapAuth = async () => {
       const savedToken = localStorage.getItem(STORAGE_KEYS.authToken) ?? "";
@@ -494,56 +512,81 @@ export default function App() {
     setLocked(Boolean(savedPin));
   }, [appUserId]);
 
-  useEffect(() => {
-    if (!appUserId) {
-      return;
+
+const refreshEntitlement = useCallback(async () => {
+  if (!appUserId) {
+    return;
+  }
+
+  if (!BILLING_BACKEND_URL) {
+    setEntitlement({
+      loading: false,
+      premiumActive: false,
+      productId: null,
+      expiresAt: null,
+      error: "Set VITE_BILLING_API_BASE_URL to enable server entitlement checks.",
+    });
+    return;
+  }
+
+  try {
+    setEntitlement((prev) => ({ ...prev, loading: true, error: "" }));
+    const response = await fetch(
+      `${BILLING_BACKEND_URL}/api/billing/entitlement/${encodeURIComponent(appUserId)}`
+    );
+    if (!response.ok) {
+      throw new Error("Entitlement request failed");
     }
-    const refreshEntitlement = async () => {
-      if (!BILLING_BACKEND_URL) {
-        setEntitlement({
-          loading: false,
-          premiumActive: false,
-          productId: null,
-          expiresAt: null,
-          error: "Set VITE_BILLING_API_BASE_URL to enable server entitlement checks.",
-        });
-        return;
-      }
 
-      try {
-        setEntitlement((prev) => ({ ...prev, loading: true, error: "" }));
-        const response = await fetch(`${BILLING_BACKEND_URL}/api/billing/entitlement/${encodeURIComponent(appUserId)}`);
-        if (!response.ok) {
-          throw new Error("Entitlement request failed");
-        }
-        const payload = (await response.json()) as {
-          ok?: boolean;
-          premiumActive?: boolean;
-          productId?: string | null;
-          expiresAt?: string | null;
-        };
-
-        setEntitlement({
-          loading: false,
-          premiumActive: Boolean(payload.ok && payload.premiumActive),
-          productId: payload.productId ?? null,
-          expiresAt: payload.expiresAt ?? null,
-          error: "",
-        });
-      } catch {
-        setEntitlement({
-          loading: false,
-          premiumActive: false,
-          productId: null,
-          expiresAt: null,
-          error: "Unable to refresh premium state from server.",
-        });
-      }
+    const payload = (await response.json()) as {
+      ok?: boolean;
+      premiumActive?: boolean;
+      productId?: string | null;
+      expiresAt?: string | null;
     };
 
-    void refreshEntitlement();
-  }, [appUserId]);
+    setEntitlement({
+      loading: false,
+      premiumActive: Boolean(payload.ok && payload.premiumActive),
+      productId: payload.productId ?? null,
+      expiresAt: payload.expiresAt ?? null,
+      error: "",
+    });
+  } catch {
+    setEntitlement({
+      loading: false,
+      premiumActive: false,
+      productId: null,
+      expiresAt: null,
+      error: "Unable to refresh premium state from server.",
+    });
+  }
+}, [appUserId]);
 
+useEffect(() => {
+  void refreshEntitlement();
+}, [refreshEntitlement]);
+
+
+useEffect(() => {
+  const refreshAfterReturn = () => {
+    if (document.visibilityState === "visible") {
+      setTimeout(() => {
+        void refreshEntitlement();
+      }, 1200);
+    }
+  };
+
+  document.addEventListener("visibilitychange", refreshAfterReturn);
+  window.addEventListener("focus", refreshAfterReturn);
+
+  return () => {
+    document.removeEventListener("visibilitychange", refreshAfterReturn);
+    window.removeEventListener("focus", refreshAfterReturn);
+  };
+}, [refreshEntitlement]);
+
+ 
   useEffect(() => {
     if (!appUserId) {
       return;
@@ -2130,12 +2173,16 @@ export default function App() {
                   : "Payment-day sound: OFF"
                 : "Payment-day sound (Premium)"}
             </button>
-            <button
-              onClick={() => setShowPremiumPanel((prev) => !prev)}
-              className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950"
-            >
-              {canUsePremiumFeatures ? "Manage Premium" : "Passer a Premium"}
-            </button>
+
+{canUsePremiumFeatures && (
+  <button
+    onClick={() => setShowPremiumPanel(true)}
+    className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950"
+  >
+    Manage Premium
+  </button>
+)}
+
             {pin && (
               <button onClick={() => setLocked(true)} className="rounded-lg border border-slate-600 px-3 py-2 text-sm">
                 Lock now
@@ -2175,23 +2222,32 @@ export default function App() {
 
         {showPremiumPanel && (
           <section className="mb-6 rounded-xl border border-amber-500/40 bg-slate-900 p-4">
-            <h2 className="text-lg font-semibold text-amber-300">Passer a Premium</h2>
+            <h2 className="text-lg font-semibold text-amber-300">Premium Plans</h2>
             <p className="mt-1 text-sm text-slate-300">
               Free: up to {FREE_ITEM_LIMIT} items and {FREE_CATEGORY_LIMIT} categories. Premium: unlimited items/categories, Backup & Restore, and Budget Guard.
             </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              <div className="rounded-lg border border-slate-700 bg-slate-950 p-3">
-                <p className="text-sm font-medium">Monthly</p>
-                <p className="text-sm text-cyan-300">{formatMoney(RECOMMENDED_PRICES_MAD.monthly)} / month</p>
-                <p className="text-xs text-slate-400">Product ID: premium_monthly</p>
-              </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-950 p-3">
-                <p className="text-sm font-medium">Yearly</p>
-                <p className="text-sm text-cyan-300">{formatMoney(RECOMMENDED_PRICES_MAD.yearly)} / year</p>
-                <p className="text-xs text-emerald-300">Save about {yearlyDiscountPercent}% vs monthly</p>
-                <p className="text-xs text-slate-400">Product ID: premium_yearly</p>
-              </div>
-            </div>
+  <button
+    type="button"
+    onClick={() => openPlaySubscription("premium_monthly")}
+    className="rounded-lg border border-slate-700 bg-slate-950 p-3 text-left transition hover:border-cyan-400"
+  >
+    <p className="text-sm font-medium">Monthly</p>
+    <p className="text-sm text-cyan-300">{formatMoney(RECOMMENDED_PRICES_MAD.monthly)} / month</p>
+    <p className="text-xs text-slate-400">Product ID: premium_monthly</p>
+  </button>
+
+  <button
+    type="button"
+    onClick={() => openPlaySubscription("premium_yearly")}
+    className="rounded-lg border border-slate-700 bg-slate-950 p-3 text-left transition hover:border-cyan-400"
+  >
+    <p className="text-sm font-medium">Yearly</p>
+    <p className="text-sm text-cyan-300">{formatMoney(RECOMMENDED_PRICES_MAD.yearly)} / year</p>
+    <p className="text-xs text-emerald-300">Save about {yearlyDiscountPercent}% vs monthly</p>
+    <p className="text-xs text-slate-400">Product ID: premium_yearly</p>
+  </button>
+</div>
             <p className="mt-3 text-xs text-slate-400">
               Purchases are handled in the Android app through Google Play Billing. Final charged prices come from Play Store offers.
               Premium is activated only after backend validation.
@@ -2203,12 +2259,7 @@ export default function App() {
               >
                 Close
               </button>
-              <button
-                onClick={() => window.open("https://play.google.com/store/apps", "_blank")}
-                className="rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950"
-              >
-                Open Play Store
-              </button>
+           
             </div>
             <p className="mt-3 text-xs text-slate-500">
               Entitlement status: {entitlement.loading ? "Checking..." : canUsePremiumFeatures ? "Premium active" : "Free"}
@@ -2220,30 +2271,39 @@ export default function App() {
         )}
 
         <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
-          <h2 className="text-lg font-semibold">Subscription Status</h2>
-          <p className="mt-2 text-sm text-slate-300">
-            Status: {entitlement.loading ? "Checking" : canUsePremiumFeatures ? "Premium active" : "Free plan"}
-            {entitlement.productId ? ` • Plan ${entitlement.productId}` : ""}
-            {entitlement.expiresAt ? ` • Renewal ${new Date(entitlement.expiresAt).toLocaleDateString()}` : ""}
-          </p>
-          {entitlement.error && <p className="mt-1 text-xs text-red-300">{entitlement.error}</p>}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              onClick={() => window.open(PLAY_SUBSCRIPTION_MANAGE_URL, "_blank")}
-              className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300"
-            >
-              Manage on Google Play
-            </button>
-            {!canUsePremiumFeatures && (
-              <button
-                onClick={() => setShowPremiumPanel(true)}
-                className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950"
-              >
-                Upgrade to Premium
-              </button>
-            )}
-          </div>
-        </section>
+  <h2 className="text-lg font-semibold">Subscription Status</h2>
+  <p className="mt-2 text-sm text-slate-300">
+    Status: {entitlement.loading ? "Checking" : canUsePremiumFeatures ? "Premium active" : "Free plan"}
+    {entitlement.productId ? ` • Plan ${entitlement.productId}` : ""}
+    {entitlement.expiresAt ? ` • Renewal ${new Date(entitlement.expiresAt).toLocaleDateString()}` : ""}
+  </p>
+  {entitlement.error && <p className="mt-1 text-xs text-red-300">{entitlement.error}</p>}
+
+  <div className="mt-3 flex flex-wrap gap-2">
+    <button
+      onClick={() => window.open(PLAY_SUBSCRIPTION_MANAGE_URL, "_blank")}
+      className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300"
+    >
+      Manage on Google Play
+    </button>
+
+    <button
+      onClick={() => void refreshEntitlement()}
+      className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300"
+    >
+      Refresh subscription status
+    </button>
+
+    {!canUsePremiumFeatures && (
+      <button
+        onClick={() => setShowPremiumPanel(true)}
+        className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950"
+      >
+        Upgrade to Premium
+      </button>
+    )}
+  </div>
+</section>
 
         <section className="mb-6 grid gap-3 sm:grid-cols-3">
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
