@@ -2,7 +2,7 @@ import { useCallback, FormEvent, useEffect, useMemo, useState } from "react";
 
 type ItemType = "bill" | "subscription";
 type StatusFilter = "all" | "dueSoon" | "paid" | "unpaid";
-type Currency = "USD" | "EUR" | "GBP" | "MAD" | "CAD" | "AUD" | "CHF" | "JPY" | "CNY" | "INR" | "BRL" | "MXN" | "TRY" | "ZAR" | "EGP" | "SAR" | "AED" | "TND" | "DZD" | "SEK" | "KRW";
+type Currency = "USD" | "EUR" | "GBP" | "MAD" | "CAD" | "AUD" | "CHF" | "JPY" | "CNY" | "INR" | "BRL" | "MXN" | "TRY" | "ZAR" | "EGP" | "SAR" | "AED" | "QAR" | "TND" | "DZD" | "SEK" | "KRW";
 type FxState = "idle" | "live" | "fallback";
 
 type EntitlementState = {
@@ -239,6 +239,7 @@ const FALLBACK_CURRENCY_TO_MAD: Record<Currency, number> = {
   AED: 2.72,
   TND: 3.24,
   DZD: 0.075,
+  QAR: 2.75,
   SEK: 0.97,
   KRW: 0.0073,
 };
@@ -2855,6 +2856,7 @@ const smartTips = useMemo(() => {
               <option value="EGP">🇪🇬 EGP</option>
               <option value="SAR">🇸🇦 SAR</option>
               <option value="AED">🇦🇪 AED</option>
+              <option value="QAR">🇶🇦 QAR</option>
               <option value="TND">🇹🇳 TND</option>
               <option value="DZD">🇩🇿 DZD</option>
               <option value="MAD">🇲🇦 MAD</option>
