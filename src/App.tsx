@@ -2,7 +2,7 @@ import { useCallback, FormEvent, useEffect, useMemo, useState } from "react";
 
 type ItemType = "bill" | "subscription";
 type StatusFilter = "all" | "dueSoon" | "paid" | "unpaid";
-type Currency = "MAD" | "EUR" | "USD" | "GBP";
+type Currency = "USD" | "EUR" | "GBP" | "MAD" | "CAD" | "AUD" | "CHF" | "JPY" | "CNY" | "INR" | "BRL" | "MXN" | "TRY" | "ZAR" | "EGP" | "SAR" | "AED" | "TND" | "DZD" | "SEK" | "KRW";
 type FxState = "idle" | "live" | "fallback";
 
 type EntitlementState = {
@@ -221,9 +221,26 @@ const seedItems: BillItem[] = [
 const DAY_MS = 24 * 60 * 60 * 1000;
 const FALLBACK_CURRENCY_TO_MAD: Record<Currency, number> = {
   MAD: 1,
-  EUR: 10.8,
   USD: 10,
+  EUR: 10.8,
   GBP: 12.6,
+  CAD: 7.4,
+  AUD: 6.5,
+  CHF: 11.3,
+  JPY: 0.067,
+  CNY: 1.38,
+  INR: 0.12,
+  BRL: 1.73,
+  MXN: 0.59,
+  TRY: 0.29,
+  ZAR: 0.54,
+  EGP: 0.20,
+  SAR: 2.67,
+  AED: 2.72,
+  TND: 3.24,
+  DZD: 0.075,
+  SEK: 0.97,
+  KRW: 0.0073,
 };
 
 function toMAD(amount: number, currency: Currency, rates: Record<Currency, number>) {
@@ -439,7 +456,7 @@ export default function App() {
   const [phoneLocalNumber, setPhoneLocalNumber] = useState("");
   const [items, setItems] = useState<BillItem[]>([]);
   const [templates, setTemplates] = useState<Template[]>(DEFAULT_TEMPLATES);
-  const [currency, setCurrency] = useState<Currency>("MAD");
+  const [currency, setCurrency] = useState<Currency>("USD");
   const [currencyToMAD, setCurrencyToMAD] = useState<Record<Currency, number>>(FALLBACK_CURRENCY_TO_MAD);
   const [fxUpdatedAt, setFxUpdatedAt] = useState("");
   const [fxState, setFxState] = useState<FxState>("idle");
@@ -609,7 +626,14 @@ const refreshExchangeRates = useCallback(async () => {
       if (!eurRate || !usdRate || !gbpRate || eurRate <= 0 || usdRate <= 0 || gbpRate <= 0) {
         throw new Error("Invalid rate payload");
       }
-      setCurrencyToMAD({ MAD: 1, EUR: 1 / eurRate, USD: 1 / usdRate, GBP: 1 / gbpRate });
+      const rates = (data.rates ?? {}) as Record<string, number>;
+  const toMAD: Record<string, number> = { MAD: 1 };
+  for (const curr of Object.keys(FALLBACK_CURRENCY_TO_MAD)) {
+    if (curr === "MAD") continue;
+    const r = rates[curr];
+    toMAD[curr] = r && r > 0 ? 1 / r : FALLBACK_CURRENCY_TO_MAD[curr as Currency];
+  }
+  setCurrencyToMAD(toMAD as Record<Currency, number>);
       setFxUpdatedAt(new Date().toISOString());
       setFxState("live");
       setToastMessage("Exchange rates updated.");
@@ -740,7 +764,7 @@ const refreshExchangeRates = useCallback(async () => {
     }
     setItems(readLS<BillItem[]>(userScopedKey(STORAGE_KEYS.items), seedItems));
     setTemplates(readLS<Template[]>(userScopedKey(STORAGE_KEYS.templates), DEFAULT_TEMPLATES));
-    setCurrency(readLS<Currency>(userScopedKey(STORAGE_KEYS.currency), "MAD"));
+    setCurrency(readLS<Currency>(userScopedKey(STORAGE_KEYS.currency), "USD"));
     setCurrencyToMAD(readLS<Record<Currency, number>>(userScopedKey(STORAGE_KEYS.exchangeRates), FALLBACK_CURRENCY_TO_MAD));
     setFxUpdatedAt(readLS<string>(userScopedKey(STORAGE_KEYS.exchangeRatesUpdatedAt), ""));
     setBudget(readLS<number>(userScopedKey(STORAGE_KEYS.budget), 5000));
@@ -945,13 +969,14 @@ useEffect(() => {
     return () => window.clearTimeout(timeout);
   }, []);
 
-  const formatMoney = useCallback((amountMAD: number) =>
-    new Intl.NumberFormat(currency === "MAD" ? "fr-MA" : "en", {
+const formatMoney = useCallback((amountMAD: number) => {
+    const noDecimal = currency === "JPY" || currency === "KRW";
+    return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency,
-      maximumFractionDigits: 2,
-    }).format(fromMAD(amountMAD, currency, currencyToMAD)),
-  [currency, currencyToMAD]);
+      maximumFractionDigits: noDecimal ? 0 : 2,
+    }).format(fromMAD(amountMAD, currency, currencyToMAD));
+  }, [currency, currencyToMAD]);
 
   const pushNotificationCenter = (entry: Omit<NotificationEntry, "id" | "createdAt">) => {
     setNotificationCenter((prev) => [{ id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...entry }, ...prev].slice(0, 60));
@@ -2784,10 +2809,27 @@ const smartTips = useMemo(() => {
               onChange={(e) => setCurrency(e.target.value as Currency)}
               className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
             >
-              <option value="MAD">MAD</option>
-              <option value="EUR">EUR</option>
-              <option value="USD">USD</option>
-              <option value="GBP">GBP</option>
+              <option value="USD">🇺🇸 USD</option>
+              <option value="EUR">🇪🇺 EUR</option>
+              <option value="GBP">🇬🇧 GBP</option>
+              <option value="CAD">🇨🇦 CAD</option>
+              <option value="AUD">🇦🇺 AUD</option>
+              <option value="CHF">🇨🇭 CHF</option>
+              <option value="JPY">🇯🇵 JPY</option>
+              <option value="CNY">🇨🇳 CNY</option>
+              <option value="INR">🇮🇳 INR</option>
+              <option value="BRL">🇧🇷 BRL</option>
+              <option value="MXN">🇲🇽 MXN</option>
+              <option value="SEK">🇸🇪 SEK</option>
+              <option value="KRW">🇰🇷 KRW</option>
+              <option value="TRY">🇹🇷 TRY</option>
+              <option value="ZAR">🇿🇦 ZAR</option>
+              <option value="EGP">🇪🇬 EGP</option>
+              <option value="SAR">🇸🇦 SAR</option>
+              <option value="AED">🇦🇪 AED</option>
+              <option value="TND">🇹🇳 TND</option>
+              <option value="DZD">🇩🇿 DZD</option>
+              <option value="MAD">🇲🇦 MAD</option>
             </select>
             <button
               onClick={() => {
