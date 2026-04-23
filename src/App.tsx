@@ -2893,12 +2893,12 @@ const smartTips = useMemo(() => {
                 🔒
               </button>
             )}
-            <button onClick={handleLogout} className="rounded-lg border border-red-500 px-3 py-2 text-sm text-red-300">
-              Log out
-            </button>
             {entitlement.premiumActive && (
   <span className="rounded-lg bg-amber-400/20 border border-amber-400/50 px-2 py-1 text-xs font-bold text-amber-300">💎 Premium</span>
 )}
+<button onClick={handleLogout} className="rounded-lg border border-red-500 px-3 py-2 text-sm text-red-300">
+  Log out
+</button>
           </div>
         </header>
 
