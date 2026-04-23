@@ -2972,14 +2972,14 @@ const smartTips = useMemo(() => {
                 <h2 className="text-lg font-semibold flex items-center">
   💯 Financial Health
   <InfoModal title="Financial Health Score">
-    <p>Un score de <strong>0 à 100</strong> qui évalue ta santé financière :</p>
+    <p>A score from <strong>0 to 100</strong> based on your financial habits:</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li><strong>Savings rate</strong> — % épargné (max 25 pts)</li>
-      <li><strong>Budget</strong> — % du budget utilisé (max 20 pts)</li>
-      <li><strong>Bills paid</strong> — Factures payées (max 20 pts)</li>
-      <li><strong>Setup</strong> — Income, budget, goals (max 15 pts)</li>
-      <li><strong>Late fees</strong> — Pas de frais retard (max 10 pts)</li>
-      <li><strong>Balance</strong> — Fonds vs dépenses (max 10 pts)</li>
+      <li><strong>Savings rate</strong> — % of income saved (max 25 pts)</li>
+      <li><strong>Budget</strong> — % of budget used (max 20 pts)</li>
+      <li><strong>Bills paid</strong> — Bills paid this month (max 20 pts)</li>
+      <li><strong>Setup</strong> — Income, budget, goals configured (max 15 pts)</li>
+      <li><strong>Late fees</strong> — No late fees (max 10 pts)</li>
+      <li><strong>Account balance</strong> — Funds vs expenses (max 10 pts)</li>
     </ul>
     <div className="mt-2 rounded-lg bg-slate-800 p-2">
       <p className="text-[11px]"><span className="text-emerald-400">80-100</span> Excellent</p>
@@ -3045,15 +3045,15 @@ const smartTips = useMemo(() => {
               <h2 className="mb-3 text-lg font-semibold flex items-center">
   💡 Smart Tips
   <InfoModal title="Smart Tips">
-    <p>Conseils <strong>automatiques et personnalisés</strong> :</p>
+    <p><strong>Automatic personalized tips</strong> based on your data:</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li>🌟 Ton taux d'épargne</li>
-      <li>🚨 Les factures en retard</li>
-      <li>📅 Les paiements dûs aujourd'hui</li>
-      <li>🔴 Les catégories au-dessus de la limite</li>
-      <li>💸 Les frais de retard potentiels</li>
-      <li>🔄 Les abonnements inactifs à annuler</li>
-      <li>📈 L'évolution vs le mois dernier</li>
+      <li>🌟 Your savings rate</li>
+      <li>🚨 Overdue bills</li>
+      <li>📅 Payments due today</li>
+      <li>🔴 Categories over the limit</li>
+      <li>💸 Potential late fees</li>
+      <li>🔄 Inactive subscriptions to cancel</li>
+      <li>📈 Spending vs last month</li>
     </ul>
   </InfoModal>
 </h2>
@@ -3085,13 +3085,13 @@ const smartTips = useMemo(() => {
                 <h2 className="text-lg font-semibold flex items-center">
   📅 Payment Calendar
   <InfoModal title="Payment Calendar">
-    <p>Vue <strong>calendrier mensuelle</strong> de tes factures.</p>
+    <p>A <strong>monthly calendar view</strong> of your bills and subscriptions.</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li><span className="text-emerald-400">● Vert</span> — Toutes payées</li>
-      <li><span className="text-amber-400">● Orange</span> — À venir</li>
-      <li><span className="text-red-400">● Rouge</span> — Dues bientôt !</li>
+      <li><span className="text-emerald-400">● Green</span> — All bills paid</li>
+      <li><span className="text-amber-400">● Orange</span> — Upcoming bills</li>
+      <li><span className="text-red-400">● Red</span> — Due soon!</li>
     </ul>
-    <p className="mt-2 text-amber-300">💡 Clique sur un jour pour voir les détails</p>
+    <p className="mt-2 text-amber-300">💡 Click on a day to see details</p>
   </InfoModal>
 </h2>
                 <div className="flex items-center gap-2">
@@ -3163,16 +3163,16 @@ const smartTips = useMemo(() => {
                 <h2 className="text-lg font-semibold flex items-center">
   {editingItemId ? "Edit item" : "Smart Add"}
   <InfoModal title="Smart Add">
-    <p>Ajoute ou modifie une <strong>facture ou abonnement</strong>.</p>
+    <p>Add or edit a <strong>bill or subscription</strong> quickly.</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li><strong>Name</strong> — Nom de la facture</li>
-      <li><strong>Amount</strong> — Montant dans ta devise</li>
-      <li><strong>Due Day</strong> — Jour d'échéance (1-31)</li>
-      <li><strong>Category</strong> — Catégorie personnalisée</li>
-      <li><strong>Type</strong> — Bill ou Subscription</li>
-      <li><strong>Reminder</strong> — Rappel X jours avant (0-20)</li>
+      <li><strong>Name</strong> — Bill name</li>
+      <li><strong>Amount</strong> — Amount in your currency</li>
+      <li><strong>Due Day</strong> — Day of month (1-31)</li>
+      <li><strong>Category</strong> — Custom category</li>
+      <li><strong>Type</strong> — Bill or Subscription</li>
+      <li><strong>Reminder</strong> — Remind X days before (0-20)</li>
     </ul>
-    <p className="mt-2 text-cyan-300">💡 Clique sur un template en haut pour pré-remplir !</p>
+    <p className="mt-2 text-cyan-300">💡 Click a template above to auto-fill!</p>
   </InfoModal>
 </h2>
                 <div className="flex flex-wrap gap-2">
@@ -3211,12 +3211,12 @@ const smartTips = useMemo(() => {
               <h2 className="mb-3 text-lg font-semibold flex items-center">
   Search & Filter
   <InfoModal title="Search & Filter">
-    <p>Filtre tes factures rapidement :</p>
+    <p>Filter your bills to find what you need:</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li><strong>Search</strong> — Cherche par nom</li>
+      <li><strong>Search</strong> — Search by bill name</li>
       <li><strong>Status</strong> — All / Due soon / Paid / Unpaid</li>
-      <li><strong>Category</strong> — Filtrer par catégorie</li>
-      <li><strong>Reset</strong> — Effacer tous les filtres</li>
+      <li><strong>Category</strong> — Filter by category</li>
+      <li><strong>Reset</strong> — Clear all filters</li>
     </ul>
   </InfoModal>
 </h2>
@@ -3242,12 +3242,12 @@ const smartTips = useMemo(() => {
                 <h2 className="text-lg font-semibold flex items-center">
   Bills & Subscriptions
   <InfoModal title="Bills & Subscriptions">
-    <p>Ta liste de factures avec statut et actions :</p>
+    <p>Your full list of bills with status and actions:</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li><strong className="text-cyan-300">Quick edit</strong> — Montant + jour rapide</li>
-      <li><strong className="text-cyan-300">Edit</strong> — Modification complète</li>
-      <li><strong className="text-emerald-300">✓ Mark paid</strong> — Payé ce mois</li>
-      <li><strong className="text-red-300">Delete</strong> — Supprimer</li>
+      <li><strong className="text-cyan-300">Quick edit</strong> — Change amount & due day</li>
+      <li><strong className="text-cyan-300">Edit</strong> — Full edit form</li>
+      <li><strong className="text-emerald-300">✓ Mark paid</strong> — Paid this month</li>
+      <li><strong className="text-red-300">Delete</strong> — Remove permanently</li>
     </ul>
   </InfoModal>
 </h2>
@@ -3310,11 +3310,11 @@ const smartTips = useMemo(() => {
               <h2 className="mb-3 text-lg font-semibold flex items-center">
   📋 Payment History
   <InfoModal title="Payment History">
-    <p>Historique de <strong>tous tes paiements</strong> par facture.</p>
+    <p>History of <strong>all your payments</strong> per bill.</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li>Clique sur une facture pour déplier</li>
-      <li>Chaque paiement : date + montant</li>
-      <li>Max 12 paiements affichés</li>
+      <li>Click a bill to <strong>expand</strong> its history</li>
+      <li>Each payment shows date & amount</li>
+      <li>Max 12 payments displayed per bill</li>
     </ul>
   </InfoModal>
 </h2>
@@ -3380,13 +3380,13 @@ const smartTips = useMemo(() => {
                 <h2 className="mb-3 text-lg font-semibold flex items-center">
   📈 Income vs Expenses
   <InfoModal title="Income vs Expenses">
-    <p>Comparaison <strong>revenus vs dépenses</strong> mensuelles.</p>
+    <p><strong>Monthly comparison</strong> of your income and expenses.</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li><span className="text-emerald-400">■ Income</span> — Total revenus</li>
-      <li><span className="text-red-400">■ Expenses</span> — Total factures</li>
+      <li><span className="text-emerald-400">■ Income</span> — Total earnings</li>
+      <li><span className="text-red-400">■ Expenses</span> — Total bills</li>
       <li><span className="text-cyan-400">■ Balance</span> = Income − Expenses</li>
     </ul>
-    <p className="mt-2 text-amber-300">💡 Ajoute tes revenus dans Goals → Monthly Income !</p>
+    <p className="mt-2 text-amber-300">💡 Add your income in Goals → Monthly Income!</p>
   </InfoModal>
 </h2>
                 {monthlyIncome === 0 && monthlyTotal === 0 ? (
@@ -3431,12 +3431,12 @@ const smartTips = useMemo(() => {
                 <h2 className="mb-3 text-lg font-semibold flex items-center">
   📉 6-Month Trend
   <InfoModal title="6-Month Trend">
-    <p>Évolution de tes <strong>dépenses sur 6 mois</strong>.</p>
+    <p>Your <strong>spending over the last 6 months</strong>.</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li><span className="text-cyan-300">Barre cyan</span> = mois actuel</li>
-      <li><span className="text-slate-400">Barre grise</span> = mois précédents</li>
+      <li><span className="text-cyan-300">Cyan bar</span> = current month</li>
+      <li><span className="text-slate-400">Gray bar</span> = previous months</li>
     </ul>
-    <p className="mt-2 text-amber-300">💡 Tendances visibles après 2-3 mois !</p>
+    <p className="mt-2 text-amber-300">💡 Trends visible after 2-3 months of use!</p>
   </InfoModal>
 </h2>
                 {last6MonthsTotals.every((m) => m.total === 0) ? (
@@ -3467,11 +3467,11 @@ const smartTips = useMemo(() => {
                 <h2 className="mb-3 text-lg font-semibold flex items-center">
   📊 Expense by Category
   <InfoModal title="Expense by Category">
-    <p>Répartition de tes dépenses par <strong>catégorie</strong> avec %.</p>
+    <p>Breakdown of your spending by <strong>category</strong> with percentages.</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li>Couleur unique par catégorie</li>
-      <li>Montant exact + pourcentage</li>
-      <li>Total en bas de la liste</li>
+      <li>Unique color per category</li>
+      <li>Exact amount + percentage</li>
+      <li>Total at the bottom</li>
     </ul>
   </InfoModal>
 </h2>
@@ -3506,14 +3506,14 @@ const smartTips = useMemo(() => {
                 <h2 className="mb-3 text-lg font-semibold flex items-center">
   🏷️ Category Spending Limits
   <InfoModal title="Category Spending Limits">
-    <p>Définit un <strong>plafond de dépenses</strong> par catégorie.</p>
+    <p>Set a <strong>spending cap</strong> per category and get alerts when you approach it.</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li>Sélectionne une catégorie</li>
-      <li>Entre le montant limite</li>
-      <li>Clique "Set"</li>
+      <li>Select a <strong>category</strong></li>
+      <li>Enter the <strong>limit amount</strong></li>
+      <li>Click <strong>"Set"</strong></li>
     </ul>
     <div className="mt-2 rounded-lg bg-slate-800 p-2">
-      <p className="text-[11px]"><span className="text-emerald-400">✅ OK</span> — &lt;80%</p>
+      <p className="text-[11px]"><span className="text-emerald-400">✅ OK</span> — Under 80%</p>
       <p className="text-[11px]"><span className="text-amber-400">⚡ Warning</span> — 80-99%</p>
       <p className="text-[11px]"><span className="text-red-400">⚠️ OVER!</span> — 100%+</p>
     </div>
@@ -3567,13 +3567,13 @@ const smartTips = useMemo(() => {
               <h2 className="mb-3 text-lg font-semibold flex items-center">
   ⚠️ Late Fee Calculator
   <InfoModal title="Late Fee Calculator">
-    <p>Calcule les <strong>frais de retard</strong> pour tes factures impayées.</p>
+    <p>Calculate <strong>potential late fees</strong> for your overdue bills.</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li><strong>Bill name</strong> — Nom exact de la facture</li>
-      <li><strong>Fee/day</strong> — Frais par jour de retard</li>
-      <li><strong>Grace days</strong> — Jours de grâce</li>
+      <li><strong>Bill name</strong> — Exact name of the bill</li>
+      <li><strong>Fee/day</strong> — Fee per day of delay</li>
+      <li><strong>Grace days</strong> — Days before fees start</li>
     </ul>
-    <p className="mt-2 text-amber-300">💡 Frais = (jours retard − grace days) × frais/jour</p>
+    <p className="mt-2 text-amber-300">💡 Fee = (overdue days − grace days) × fee/day</p>
   </InfoModal>
 </h2>
               {lateFeeRules.length === 0 ? (
@@ -3628,14 +3628,14 @@ const smartTips = useMemo(() => {
               <h2 className="mb-3 text-lg font-semibold flex items-center">
   💰 Monthly Income
   <InfoModal title="Monthly Income">
-    <p>Ajoute tes <strong>sources de revenus</strong> mensuels.</p>
-    <p className="mt-1">L'app additionne tout pour calculer :</p>
+    <p>Add your <strong>monthly income sources</strong>: salary, freelance, business, etc.</p>
+    <p className="mt-1">The app totals everything to calculate:</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
       <li><strong className="text-emerald-300">Balance</strong> = Income − Expenses</li>
       <li><strong className="text-cyan-300">Savings Rate</strong> = (Balance / Income) × 100</li>
       <li><strong className="text-violet-300">Health Score</strong></li>
     </ul>
-    <p className="mt-2 text-amber-300">💡 Ajoute TOUS tes revenus !</p>
+    <p className="mt-2 text-amber-300">💡 Add ALL your income for accurate calculations!</p>
   </InfoModal>
 </h2>
               <div className="grid gap-2 sm:grid-cols-3">
@@ -3669,15 +3669,15 @@ const smartTips = useMemo(() => {
                 <h2 className="text-lg font-semibold flex items-center">
   🏦 Accounts
   <InfoModal title="Accounts">
-    <p>Ton <strong>portefeuille numérique</strong>.</p>
+    <p>Your <strong>digital wallet</strong>. Add all your accounts with balances.</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li>💵 <strong>Cash</strong> — Argent en poche</li>
-      <li>🏦 <strong>Bank</strong> — Comptes bancaires</li>
-      <li>💳 <strong>Card</strong> — Cartes</li>
-      <li>📱 <strong>Mobile</strong> — Orange Money, etc.</li>
+      <li>💵 <strong>Cash</strong> — Cash on hand</li>
+      <li>🏦 <strong>Bank</strong> — Bank accounts</li>
+      <li>💳 <strong>Card</strong> — Credit/debit cards</li>
+      <li>📱 <strong>Mobile</strong> — Mobile money</li>
       <li>💰 <strong>Other</strong> — Crypto, etc.</li>
     </ul>
-    <p className="mt-2 text-amber-300">💡 Clique sur le solde pour le modifier !</p>
+    <p className="mt-2 text-amber-300">💡 Click on the balance to update it!</p>
   </InfoModal>
 </h2>
                 <div className="text-right">
@@ -3721,13 +3721,13 @@ const smartTips = useMemo(() => {
                 <h2 className="text-lg font-semibold flex items-center">
   Budget Guard
   <InfoModal title="Budget Guard">
-    <p>Définit un <strong>budget mensuel maximum</strong>.</p>
+    <p>Set a <strong>monthly budget limit</strong>. The app warns you when you approach or exceed it.</p>
     <div className="mt-2 rounded-lg bg-slate-800 p-2">
-      <p className="text-[11px]"><span className="text-emerald-400">✅ 0-80%</span> — Dans le budget</p>
-      <p className="text-[11px]"><span className="text-amber-400">⚡ 80-99%</span> — Attention !</p>
-      <p className="text-[11px]"><span className="text-red-400">🚨 100%+</span> — Dépassé !</p>
+      <p className="text-[11px]"><span className="text-emerald-400">✅ 0-80%</span> — Within budget</p>
+      <p className="text-[11px]"><span className="text-amber-400">⚡ 80-99%</span> — Almost done!</p>
+      <p className="text-[11px]"><span className="text-red-400">🚨 100%+</span> — Exceeded!</p>
     </div>
-    <p className="mt-2 text-amber-300">💡 Notifications auto à 80% et 100% !</p>
+    <p className="mt-2 text-amber-300">💡 Auto notifications at 80% and 100%!</p>
   </InfoModal>
 </h2>
                 <label className="text-sm text-slate-400">Monthly budget</label>
@@ -3747,11 +3747,11 @@ const smartTips = useMemo(() => {
                 <h2 className="mb-3 text-lg font-semibold flex items-center">
   🎯 Savings Goals
   <InfoModal title="Savings Goals">
-    <p>Crée des <strong>objectifs d'épargne</strong> avec une cible.</p>
+    <p>Create <strong>savings goals</strong> with a target amount and optional deadline.</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li>Clique <strong className="text-cyan-300">"+ Add"</strong> pour épargner</li>
-      <li>Barre de progression en temps réel</li>
-      <li>100% atteint → 🎉 GOAL REACHED !</li>
+      <li>Click <strong className="text-cyan-300">"+ Add"</strong> to add money</li>
+      <li>Progress bar updates in real time</li>
+      <li>100% reached → 🎉 GOAL REACHED!</li>
     </ul>
   </InfoModal>
 </h2>
@@ -3800,11 +3800,11 @@ const smartTips = useMemo(() => {
               <h2 className="mb-3 text-lg font-semibold flex items-center">
   📈 Savings Projections
   <InfoModal title="Savings Projections">
-    <p>L'app <strong>calcule automatiquement</strong> combien épargner/mois.</p>
+    <p>The app <strong>automatically calculates</strong> how much to save per month.</p>
     <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li>⏰ Mois restants jusqu'au deadline</li>
-      <li>📊 3 scénarios : 3, 6, ou 12 mois</li>
-      <li>💡 Conseil basé sur ton balance</li>
+      <li>⏰ Months left until deadline</li>
+      <li>📊 3 scenarios: 3, 6, or 12 months</li>
+      <li>💡 Personalized advice based on your balance</li>
     </ul>
   </InfoModal>
 </h2>
