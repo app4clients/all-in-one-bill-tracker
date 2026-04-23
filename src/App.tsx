@@ -130,12 +130,15 @@ const STORAGE_KEYS = {
 
 const FREE_ITEM_LIMIT = 8;
 const FREE_CATEGORY_LIMIT = 3;
+const FREE_ACCOUNT_LIMIT = 2;
+const FREE_SAVINGS_GOAL_LIMIT = 1;
+const FREE_CATEGORY_LIMIT_COUNT = 1;
 const BILLING_BACKEND_URL = (import.meta.env.VITE_BILLING_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 const AUTH_API_BASE_URL = (import.meta.env.VITE_AUTH_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 const PLAY_SUBSCRIPTION_MANAGE_URL = "https://play.google.com/store/account/subscriptions";
 const RECOMMENDED_PRICES_MAD = {
-  monthly: 19,
-  yearly: 149,
+  monthly: 30,
+  yearly: 200,
 };
 
 const ANDROID_PACKAGE_NAME = "com.app4clients.allinonebilltracker";
@@ -1144,9 +1147,14 @@ const monthlyIncome = useMemo(() => incomes.reduce((sum, i) => sum + i.amount, 0
   const totalSavingsTarget = useMemo(() => savingsGoals.reduce((sum, g) => sum + g.targetAmount, 0), [savingsGoals]);
   const totalSavingsSaved = useMemo(() => savingsGoals.reduce((sum, g) => sum + g.savedAmount, 0), [savingsGoals]);
 
-  const addSavingsGoal = () => {
+    const addSavingsGoal = () => {
     if (!savingsForm.label.trim() || savingsForm.targetAmount <= 0) {
       setToastMessage("Please fill goal name and target amount.");
+      return;
+    }
+    if (!entitlement.premiumActive && savingsGoals.length >= FREE_SAVINGS_GOAL_LIMIT) {
+      setShowPremiumPanel(true);
+      setToastMessage(`Free plan allows ${FREE_SAVINGS_GOAL_LIMIT} savings goal. Upgrade to Premium for unlimited.`);
       return;
     }
     setSavingsGoals((prev) => [
@@ -1178,10 +1186,16 @@ const monthlyIncome = useMemo(() => incomes.reduce((sum, i) => sum + i.amount, 0
     setToastMessage("Savings goal removed.");
   };
 
-  const addCategoryLimit = () => {
+    const addCategoryLimit = () => {
     const cat = newLimitCategory.trim();
     if (!cat || newLimitAmount <= 0) {
       setToastMessage("Select a category and enter a limit.");
+      return;
+    }
+    const existingLimit = categoryLimits.find((cl) => cl.category.toLowerCase() === cat.toLowerCase());
+    if (!entitlement.premiumActive && !existingLimit && categoryLimits.length >= FREE_CATEGORY_LIMIT_COUNT) {
+      setShowPremiumPanel(true);
+      setToastMessage(`Free plan allows ${FREE_CATEGORY_LIMIT_COUNT} spending limit. Upgrade to Premium for unlimited.`);
       return;
     }
     setCategoryLimits((prev) => {
@@ -1241,9 +1255,14 @@ const monthlyIncome = useMemo(() => incomes.reduce((sum, i) => sum + i.amount, 0
 
   const totalAccountBalance = useMemo(() => accounts.reduce((sum, acc) => sum + acc.balance, 0), [accounts]);
 
-  const addAccount = () => {
+   const addAccount = () => {
     if (!accountForm.name.trim()) {
       setToastMessage("Please enter an account name.");
+      return;
+    }
+    if (!entitlement.premiumActive && accounts.length >= FREE_ACCOUNT_LIMIT) {
+      setShowPremiumPanel(true);
+      setToastMessage(`Free plan allows ${FREE_ACCOUNT_LIMIT} accounts. Upgrade to Premium for unlimited.`);
       return;
     }
     setAccounts((prev) => [
@@ -2877,6 +2896,9 @@ const smartTips = useMemo(() => {
             <button onClick={handleLogout} className="rounded-lg border border-red-500 px-3 py-2 text-sm text-red-300">
               Log out
             </button>
+            {entitlement.premiumActive && (
+  <span className="rounded-lg bg-amber-400/20 border border-amber-400/50 px-2 py-1 text-xs font-bold text-amber-300">💎 Premium</span>
+)}
           </div>
         </header>
 
@@ -3319,7 +3341,15 @@ const smartTips = useMemo(() => {
   </InfoModal>
 </h2>
 
-              {items.length === 0 ? (
+              {!entitlement.premiumActive ? (
+                <div className="py-6 text-center">
+                  <p className="text-3xl">📋</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-300">Payment History</p>
+                  <p className="mt-1 text-xs text-slate-400">Track all your past payments</p>
+                  <button onClick={() => setShowPremiumPanel(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                </div>
+              ) : items.length === 0 ? (
+
                 <p className="text-sm text-slate-400">No bills yet.</p>
               ) : (
                 <div className="space-y-2">
@@ -3439,9 +3469,17 @@ const smartTips = useMemo(() => {
     <p className="mt-2 text-amber-300">💡 Trends visible after 2-3 months of use!</p>
   </InfoModal>
 </h2>
-                {last6MonthsTotals.every((m) => m.total === 0) ? (
+                {!entitlement.premiumActive ? (
+                  <div className="py-6 text-center">
+                    <p className="text-3xl">📉</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-300">6-Month Spending Trend</p>
+                    <p className="mt-1 text-xs text-slate-400">See how your spending changes over time</p>
+                    <button onClick={() => setShowPremiumPanel(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                  </div>
+                ) : last6MonthsTotals.every((m) => m.total === 0) ? (
                   <p className="text-sm text-slate-400">Trend data will appear after a few months.</p>
                 ) : (
+
                   <div className="flex items-end gap-2" style={{ height: "180px" }}>
                     {last6MonthsTotals.map((m, idx) => {
                       const maxTotal = Math.max(...last6MonthsTotals.map((x) => x.total), 1);
@@ -3576,7 +3614,15 @@ const smartTips = useMemo(() => {
     <p className="mt-2 text-amber-300">💡 Fee = (overdue days − grace days) × fee/day</p>
   </InfoModal>
 </h2>
-              {lateFeeRules.length === 0 ? (
+               {!entitlement.premiumActive ? (
+                <div className="py-6 text-center">
+                  <p className="text-3xl">⚠️</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-300">Late Fee Calculator</p>
+                  <p className="mt-1 text-xs text-slate-400">Track potential late fees for overdue bills</p>
+                  <button onClick={() => setShowPremiumPanel(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                </div>
+              ) : lateFeeRules.length === 0 ? (
+
                 <div className="py-4 text-center">
                   <p className="text-3xl">⚠️</p>
                   <p className="mt-2 text-sm text-slate-400">Track late fees for overdue bills.</p>
@@ -3809,7 +3855,15 @@ const smartTips = useMemo(() => {
   </InfoModal>
 </h2>
 
-              {savingsGoals.length === 0 ? (
+               {!entitlement.premiumActive ? (
+                <div className="py-6 text-center">
+                  <p className="text-3xl">📈</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-300">Savings Projections</p>
+                  <p className="mt-1 text-xs text-slate-400">See how much to save per month to reach your goals</p>
+                  <button onClick={() => setShowPremiumPanel(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                </div>
+              ) : savingsGoals.length === 0 ? (
+
                 <div className="py-4 text-center">
                   <p className="text-3xl">📈</p>
                   <p className="mt-2 text-sm text-slate-400">Create savings goals to see projections.</p>
@@ -3968,8 +4022,17 @@ const smartTips = useMemo(() => {
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button onClick={exportBackup} className="rounded-lg border border-emerald-600 px-3 py-2 text-emerald-300">Export backup</button>
                     <label className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200">Restore backup<input type="file" accept="application/json" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) void restoreBackup(file); }} /></label>
-                    <button onClick={exportCsv} className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200">Export CSV</button>
-                    <button onClick={exportPdf} className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200">Export PDF</button>
+                                        {entitlement.premiumActive ? (
+                      <>
+                        <button onClick={exportCsv} className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200 hover:bg-slate-800 transition">Export CSV</button>
+                        <button onClick={exportPdf} className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200 hover:bg-slate-800 transition">Export PDF</button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg border border-amber-500/50 px-3 py-2 text-amber-300 hover:bg-amber-500/10 transition">🔒 Export CSV</button>
+                        <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg border border-amber-500/50 px-3 py-2 text-amber-300 hover:bg-amber-500/10 transition">🔒 Export PDF</button>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
