@@ -432,7 +432,11 @@ function InfoTooltip({ title, children }: { title: string; children: React.React
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div
+            className="fixed inset-0 z-40 bg-transparent"
+            onClick={() => setOpen(false)}
+            onTouchStart={() => setOpen(false)}
+          />
           <div className="absolute left-6 top-0 z-50 w-72 rounded-xl border border-slate-700 bg-slate-900 p-4 shadow-xl shadow-black/40 sm:w-80">
             <div className="mb-2 flex items-center justify-between">
               <h4 className="text-sm font-semibold text-cyan-300">💡 {title}</h4>
