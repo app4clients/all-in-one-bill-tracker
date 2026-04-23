@@ -417,6 +417,34 @@ function EyeToggleIcon({ visible }: { visible: boolean }) {
   );
 }
 
+function InfoTooltip({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex items-center">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-cyan-500/40 bg-cyan-500/10 text-xs text-cyan-300 hover:bg-cyan-500/20 transition"
+        aria-label={`Info about ${title}`}
+      >
+        i
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-6 top-0 z-50 w-72 rounded-xl border border-slate-700 bg-slate-900 p-4 shadow-xl shadow-black/40 sm:w-80">
+            <div className="mb-2 flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-cyan-300">💡 {title}</h4>
+              <button onClick={() => setOpen(false)} className="text-xs text-slate-400 hover:text-white">✕</button>
+            </div>
+            <div className="space-y-2 text-xs leading-relaxed text-slate-300">{children}</div>
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
 export default function App() {
   const [showWelcomeSplash, setShowWelcomeSplash] = useState(true);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
@@ -2940,7 +2968,27 @@ const smartTips = useMemo(() => {
             {/* Financial Health */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-lg font-semibold">💯 Financial Health</h2>
+                <h2 className="text-lg font-semibold flex items-center">
+  💯 Financial Health
+  <InfoTooltip title="Financial Health Score">
+    <p>Un score de <strong>0 à 100</strong> qui évalue ta santé financière :</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li><strong>Savings rate</strong> — % épargné (max 25 pts)</li>
+      <li><strong>Budget</strong> — % du budget utilisé (max 20 pts)</li>
+      <li><strong>Bills paid</strong> — Factures payées (max 20 pts)</li>
+      <li><strong>Setup</strong> — Income, budget, goals configurés (max 15 pts)</li>
+      <li><strong>Late fees</strong> — Pas de frais retard (max 10 pts)</li>
+      <li><strong>Balance</strong> — Fonds vs dépenses (max 10 pts)</li>
+    </ul>
+    <div className="mt-2 rounded-lg bg-slate-800 p-2">
+      <p className="text-[11px]"><span className="text-emerald-400">80-100</span> Excellent</p>
+      <p className="text-[11px]"><span className="text-cyan-400">60-79</span> Good</p>
+      <p className="text-[11px]"><span className="text-amber-400">40-59</span> Fair</p>
+      <p className="text-[11px]"><span className="text-orange-400">20-39</span> Needs Work</p>
+      <p className="text-[11px]"><span className="text-red-400">0-19</span> Critical</p>
+    </div>
+  </InfoTooltip>
+</h2>
                 <div className="text-right">
                   <span className="text-3xl font-bold" style={{ color: financialHealth.color }}>{financialHealth.score}</span>
                   <span className="text-sm text-slate-400">/100</span>
@@ -2993,7 +3041,22 @@ const smartTips = useMemo(() => {
 
             {/* Smart Tips */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <h2 className="mb-3 text-lg font-semibold">💡 Smart Tips</h2>
+              <h2 className="mb-3 text-lg font-semibold flex items-center">
+  💡 Smart Tips
+  <InfoTooltip title="Smart Tips">
+    <p>Conseils <strong>automatiques et personnalisés</strong> :</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li>🌟 Ton taux d'épargne</li>
+      <li>🚨 Les factures en retard</li>
+      <li>📅 Les paiements dûs aujourd'hui</li>
+      <li>🔴 Les catégories au-dessus de la limite</li>
+      <li>💸 Les frais de retard potentiels</li>
+      <li>🔄 Les abonnements inactifs à annuler</li>
+      <li>💡 Les jours avec trop de factures</li>
+      <li>📈 L'évolution vs le mois dernier</li>
+    </ul>
+  </InfoTooltip>
+</h2>
               {smartTips.length === 0 ? (
                 <div className="py-4 text-center">
                   <p className="text-3xl">💡</p>
@@ -3019,7 +3082,19 @@ const smartTips = useMemo(() => {
             {/* Calendar */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-lg font-semibold">📅 Payment Calendar</h2>
+                <h2 className="text-lg font-semibold flex items-center">
+  📅 Payment Calendar
+  <InfoTooltip title="Payment Calendar">
+    <p>Vue <strong>calendrier mensuelle</strong> de tes factures.</p>
+    <p className="mt-1"><strong>Indicateurs :</strong></p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li><span className="text-emerald-400">● Vert</span> — Toutes payées</li>
+      <li><span className="text-amber-400">● Orange</span> — À venir</li>
+      <li><span className="text-red-400">● Rouge</span> — Dues bientôt !</li>
+    </ul>
+    <p className="mt-2 text-amber-300">💡 Clique sur un jour pour voir les détails</p>
+  </InfoTooltip>
+</h2>
                 <div className="flex items-center gap-2">
                   <button onClick={() => { setCalendarMonth((prev) => { const m = prev.month === 0 ? 11 : prev.month - 1; const y = prev.month === 0 ? prev.year - 1 : prev.year; return { year: y, month: m }; }); setSelectedCalDay(null); }} className="rounded-lg border border-slate-700 px-2 py-1 text-sm hover:bg-slate-800">◀</button>
                   <span className="text-sm font-medium">{new Date(calendarMonth.year, calendarMonth.month).toLocaleDateString("en", { month: "long", year: "numeric" })}</span>
@@ -3086,7 +3161,21 @@ const smartTips = useMemo(() => {
             {/* Smart Add Form */}
             <section className="mb-6">
               <form onSubmit={onAddItem} className="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <h2 className="text-lg font-semibold">{editingItemId ? "Edit item" : "Smart Add"}</h2>
+                <h2 className="text-lg font-semibold flex items-center">
+  {editingItemId ? "Edit item" : "Smart Add"}
+  <InfoTooltip title="Smart Add">
+    <p>Ajoute ou modifie une <strong>facture ou abonnement</strong>.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li><strong>Name</strong> — Nom de la facture</li>
+      <li><strong>Amount</strong> — Montant dans ta devise</li>
+      <li><strong>Due Day</strong> — Jour d'échéance (1-31)</li>
+      <li><strong>Category</strong> — Catégorie personnalisée</li>
+      <li><strong>Type</strong> — Bill ou Subscription</li>
+      <li><strong>Reminder</strong> — Rappel X jours avant (0-20)</li>
+    </ul>
+    <p className="mt-2 text-cyan-300">💡 Clique sur un template en haut pour pré-remplir !</p>
+  </InfoTooltip>
+</h2>
                 <div className="flex flex-wrap gap-2">
                   {templates.map((template) => (
                     <button key={template.name} type="button" onClick={() => applyTemplate(template)} className="rounded-full border border-slate-700 px-3 py-1 text-sm text-slate-200">{template.name}</button>
@@ -3120,7 +3209,18 @@ const smartTips = useMemo(() => {
 
             {/* Search & Filter */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <h2 className="mb-3 text-lg font-semibold">Search & Filter</h2>
+              <h2 className="mb-3 text-lg font-semibold flex items-center">
+  Search & Filter
+  <InfoTooltip title="Search & Filter">
+    <p>Filtre tes factures rapidement :</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li><strong>Search</strong> — Cherche par nom</li>
+      <li><strong>Status</strong> — All / Due soon / Paid / Unpaid</li>
+      <li><strong>Category</strong> — Filtrer par catégorie</li>
+      <li><strong>Reset</strong> — Effacer tous les filtres</li>
+    </ul>
+  </InfoTooltip>
+</h2>
               <div className="grid gap-3 sm:grid-cols-4">
                 <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
                 <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
@@ -3140,7 +3240,18 @@ const smartTips = useMemo(() => {
             {/* Bills List */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-lg font-semibold">Bills & Subscriptions</h2>
+                <h2 className="text-lg font-semibold flex items-center">
+  Bills & Subscriptions
+  <InfoTooltip title="Bills & Subscriptions">
+    <p>Ta liste de factures avec statut et actions :</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li><strong className="text-cyan-300">Quick edit</strong> — Montant + jour rapide</li>
+      <li><strong className="text-cyan-300">Edit</strong> — Modification complète</li>
+      <li><strong className="text-emerald-300">✓ Mark paid</strong> — Payé ce mois</li>
+      <li><strong className="text-red-300">Delete</strong> — Supprimer</li>
+    </ul>
+  </InfoTooltip>
+</h2>
                 {filtered.some((item) => !item.paid) && (
                   <button onClick={() => { filtered.filter((item) => !item.paid).forEach((item) => markPaid(item.id)); setToastMessage("All visible items marked as paid."); }} className="rounded-lg border border-emerald-600 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 active:scale-95 transition-transform">✓ Mark all visible as paid</button>
                 )}
@@ -3197,7 +3308,17 @@ const smartTips = useMemo(() => {
 
             {/* Payment History */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <h2 className="mb-3 text-lg font-semibold">📋 Payment History</h2>
+              <h2 className="mb-3 text-lg font-semibold flex items-center">
+  📋 Payment History
+  <InfoTooltip title="Payment History">
+    <p>Historique de <strong>tous tes paiements</strong> par facture.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li>Clique sur une facture pour <strong>déplier</strong></li>
+      <li>Chaque paiement : date + montant</li>
+      <li>Max 12 paiements affichés</li>
+    </ul>
+  </InfoTooltip>
+</h2>
 
               {items.length === 0 ? (
                 <p className="text-sm text-slate-400">No bills yet.</p>
@@ -3257,7 +3378,18 @@ const smartTips = useMemo(() => {
             {/* Income vs Expenses + 6 Month Trend */}
             <section className="mb-6 grid gap-6 lg:grid-cols-2">
               <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <h2 className="mb-3 text-lg font-semibold">📈 Income vs Expenses</h2>
+                <h2 className="mb-3 text-lg font-semibold flex items-center">
+  📈 Income vs Expenses
+  <InfoTooltip title="Income vs Expenses">
+    <p>Comparaison <strong>revenus vs dépenses</strong> mensuelles.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li><span className="text-emerald-400">■ Income</span> — Total revenus</li>
+      <li><span className="text-red-400">■ Expenses</span> — Total factures</li>
+      <li><span className="text-cyan-400">■ Balance</span> = Income − Expenses</li>
+    </ul>
+    <p className="mt-2 text-amber-300">💡 Ajoute tes revenus dans Goals → Monthly Income !</p>
+  </InfoTooltip>
+</h2>
                 {monthlyIncome === 0 && monthlyTotal === 0 ? (
                   <p className="text-sm text-slate-400">Add income and bills to see the comparison.</p>
                 ) : (
@@ -3297,7 +3429,17 @@ const smartTips = useMemo(() => {
               </div>
 
               <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <h2 className="mb-3 text-lg font-semibold">📉 6-Month Trend</h2>
+                <h2 className="mb-3 text-lg font-semibold flex items-center">
+  📉 6-Month Trend
+  <InfoTooltip title="6-Month Trend">
+    <p>Évolution de tes <strong>dépenses sur 6 mois</strong>.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li><span className="text-cyan-300">Barre cyan</span> = mois actuel</li>
+      <li><span className="text-slate-400">Barre grise</span> = mois précédents</li>
+    </ul>
+    <p className="mt-2 text-amber-300">💡 Tendances visibles après 2-3 mois !</p>
+  </InfoTooltip>
+</h2>
                 {last6MonthsTotals.every((m) => m.total === 0) ? (
                   <p className="text-sm text-slate-400">Trend data will appear after a few months.</p>
                 ) : (
@@ -3323,7 +3465,17 @@ const smartTips = useMemo(() => {
             {/* Expense by Category */}
             <section className="mb-6 grid gap-6 lg:grid-cols-2">
               <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <h2 className="mb-3 text-lg font-semibold">📊 Expense by Category</h2>
+                <h2 className="mb-3 text-lg font-semibold flex items-center">
+  📊 Expense by Category
+  <InfoTooltip title="Expense by Category">
+    <p>Répartition de tes dépenses par <strong>catégorie</strong> avec %.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li>Couleur unique par catégorie</li>
+      <li>Montant exact + pourcentage</li>
+      <li>Total en bas de la liste</li>
+    </ul>
+  </InfoTooltip>
+</h2>
                 {categoryTotals.length === 0 ? (
                   <p className="text-sm text-slate-400">No expenses yet.</p>
                 ) : (
@@ -3352,7 +3504,22 @@ const smartTips = useMemo(() => {
 
               {/* Category Limits */}
               <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <h2 className="mb-3 text-lg font-semibold">🏷️ Category Spending Limits</h2>
+                <h2 className="mb-3 text-lg font-semibold flex items-center">
+  🏷️ Category Spending Limits
+  <InfoTooltip title="Category Spending Limits">
+    <p>Définit un <strong>plafond de dépenses</strong> par catégorie.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li>Sélectionne une catégorie</li>
+      <li>Entre le montant limite</li>
+      <li>Clique "Set"</li>
+    </ul>
+    <div className="mt-2 rounded-lg bg-slate-800 p-2">
+      <p className="text-[11px]"><span className="text-emerald-400">✅ OK</span> — &lt;80%</p>
+      <p className="text-[11px]"><span className="text-amber-400">⚡ Warning</span> — 80-99%</p>
+      <p className="text-[11px]"><span className="text-red-400">⚠️ OVER!</span> — 100%+</p>
+    </div>
+  </InfoTooltip>
+</h2>
                 {categoryLimitStatus.length === 0 ? (
                   <div className="py-4 text-center">
                     <p className="text-3xl">🏷️</p>
@@ -3398,7 +3565,18 @@ const smartTips = useMemo(() => {
 
             {/* Late Fee Calculator */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <h2 className="mb-3 text-lg font-semibold">⚠️ Late Fee Calculator</h2>
+              <h2 className="mb-3 text-lg font-semibold flex items-center">
+  ⚠️ Late Fee Calculator
+  <InfoTooltip title="Late Fee Calculator">
+    <p>Calcule les <strong>frais de retard</strong> pour tes factures impayées.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li><strong>Bill name</strong> — Nom exact de la facture</li>
+      <li><strong>Fee/day</strong> — Frais par jour de retard</li>
+      <li><strong>Grace days</strong> — Jours de grâce</li>
+    </ul>
+    <p className="mt-2 text-amber-300">💡 Frais = (jours retard − grace days) × frais/jour</p>
+  </InfoTooltip>
+</h2>
               {lateFeeRules.length === 0 ? (
                 <div className="py-4 text-center">
                   <p className="text-3xl">⚠️</p>
@@ -3448,7 +3626,19 @@ const smartTips = useMemo(() => {
           <>
             {/* Income */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <h2 className="mb-3 text-lg font-semibold">💰 Monthly Income</h2>
+              <h2 className="mb-3 text-lg font-semibold flex items-center">
+  💰 Monthly Income
+  <InfoTooltip title="Monthly Income">
+    <p>Ajoute tes <strong>sources de revenus</strong> mensuels.</p>
+    <p className="mt-1">L'app additionne tout pour calculer :</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li><strong className="text-emerald-300">Balance</strong> = Income − Expenses</li>
+      <li><strong className="text-cyan-300">Savings Rate</strong> = (Balance / Income) × 100</li>
+      <li><strong className="text-violet-300">Health Score</strong></li>
+    </ul>
+    <p className="mt-2 text-amber-300">💡 Ajoute TOUS tes revenus pour des calculs précis !</p>
+  </InfoTooltip>
+</h2>
               <div className="grid gap-2 sm:grid-cols-3">
                 <input value={incomeForm.label} onChange={(e) => setIncomeForm((prev) => ({ ...prev, label: e.target.value }))} placeholder="Income label" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
                 <input type="number" min={0} step="0.01" value={incomeForm.amount > 0 ? Number(fromMAD(incomeForm.amount, currency, currencyToMAD).toFixed(2)) : ""} onChange={(e) => setIncomeForm((prev) => ({ ...prev, amount: toMAD(Number(e.target.value || 0), currency, currencyToMAD) }))} placeholder={`Amount (${currency})`} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
@@ -3477,7 +3667,20 @@ const smartTips = useMemo(() => {
             {/* Accounts */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-lg font-semibold">🏦 Accounts</h2>
+                <h2 className="text-lg font-semibold flex items-center">
+  🏦 Accounts
+  <InfoTooltip title="Accounts">
+    <p>Ton <strong>portefeuille numérique</strong>. Ajoute tes comptes.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li>💵 <strong>Cash</strong> — Argent en poche</li>
+      <li>🏦 <strong>Bank</strong> — Comptes bancaires</li>
+      <li>💳 <strong>Card</strong> — Cartes</li>
+      <li>📱 <strong>Mobile</strong> — Orange Money, etc.</li>
+      <li>💰 <strong>Other</strong> — Crypto, etc.</li>
+    </ul>
+    <p className="mt-2 text-amber-300">💡 Clique sur le solde pour le modifier !</p>
+  </InfoTooltip>
+</h2>
                 <div className="text-right">
                   <p className="text-xs text-slate-400">Total Balance</p>
                   <p className={`text-lg font-bold ${totalAccountBalance >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatMoney(totalAccountBalance)}</p>
@@ -3516,7 +3719,18 @@ const smartTips = useMemo(() => {
             {/* Budget Guard + Savings Goals */}
             <section className="mb-6 grid gap-6 lg:grid-cols-2">
               <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <h2 className="text-lg font-semibold">Budget Guard</h2>
+                <h2 className="text-lg font-semibold flex items-center">
+  Budget Guard
+  <InfoTooltip title="Budget Guard">
+    <p>Définit un <strong>budget mensuel maximum</strong>.</p>
+    <div className="mt-2 rounded-lg bg-slate-800 p-2">
+      <p className="text-[11px]"><span className="text-emerald-400">✅ 0-80%</span> — Dans le budget</p>
+      <p className="text-[11px]"><span className="text-amber-400">⚡ 80-99%</span> — Attention !</p>
+      <p className="text-[11px]"><span className="text-red-400">🚨 100%+</span> — Dépassé !</p>
+    </div>
+    <p className="mt-2 text-amber-300">💡 Notifications automatiques à 80% et 100% !</p>
+  </InfoTooltip>
+</h2>
                 <label className="text-sm text-slate-400">Monthly budget</label>
                 <input type="number" min={0} value={budget > 0 ? Number(fromMAD(budget, currency, currencyToMAD).toFixed(2)) : ""} onChange={(e) => setBudget(toMAD(Number(e.target.value || 0), currency, currencyToMAD))} placeholder={`Budget (${currency})`} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
                 <div className="h-3 overflow-hidden rounded-full bg-slate-800">
@@ -3531,7 +3745,17 @@ const smartTips = useMemo(() => {
               </div>
 
               <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <h2 className="mb-3 text-lg font-semibold">🎯 Savings Goals</h2>
+                <h2 className="mb-3 text-lg font-semibold flex items-center">
+  🎯 Savings Goals
+  <InfoTooltip title="Savings Goals">
+    <p>Crée des <strong>objectifs d'épargne</strong> avec une cible.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li>Clique <strong className="text-cyan-300">"+ Add"</strong> pour ajouter de l'argent</li>
+      <li>Barre de progression en temps réel</li>
+      <li>100% atteint → 🎉 GOAL REACHED !</li>
+    </ul>
+  </InfoTooltip>
+</h2>
                 {savingsGoals.length === 0 ? (
                   <div className="py-4 text-center">
                     <p className="text-3xl">🎯</p>
@@ -3574,7 +3798,17 @@ const smartTips = useMemo(() => {
 
                         {/* Savings Projections */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <h2 className="mb-3 text-lg font-semibold">📈 Savings Projections</h2>
+              <h2 className="mb-3 text-lg font-semibold flex items-center">
+  📈 Savings Projections
+  <InfoTooltip title="Savings Projections">
+    <p>L'app <strong>calcule automatiquement</strong> combien épargner/mois.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li>⏰ Mois restants jusqu'au deadline</li>
+      <li>📊 3 scénarios : 3, 6, ou 12 mois</li>
+      <li>💡 Conseil basé sur ton balance</li>
+    </ul>
+  </InfoTooltip>
+</h2>
 
               {savingsGoals.length === 0 ? (
                 <div className="py-4 text-center">
