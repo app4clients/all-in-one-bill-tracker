@@ -3966,37 +3966,76 @@ const smartTips = useMemo(() => {
   <section className="mb-6 rounded-xl border border-amber-500/40 bg-slate-900 p-4">
     <h2 className="text-lg font-semibold text-amber-300">💎 Upgrade to Premium</h2>
     <p className="mt-2 text-sm text-slate-300">
-      You'll be redirected to our secure website to complete payment via PayPal or Gumroad.
+      Unlock unlimited bills, analytics, savings goals, and more!
     </p>
-    <div className="mt-4 grid gap-2 sm:grid-cols-2">
+
+    {/* Payment methods info */}
+    <div className="mt-3 rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3">
+      <p className="text-xs font-semibold text-cyan-300 mb-2">💳 Accepted Payment Methods:</p>
+      <div className="flex flex-wrap gap-2">
+        <span className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300">💳 Credit Card</span>
+        <span className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300">🅿️ PayPal</span>
+        <span className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300">🍎 Apple Pay</span>
+        <span className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300">🌍 Debit Card</span>
+      </div>
+      <p className="mt-2 text-[11px] text-slate-500">All payments are processed securely via Gumroad.</p>
+    </div>
+
+    {/* Plans */}
+    <div className="mt-4 grid gap-3 sm:grid-cols-2">
       <div className="rounded-lg border border-slate-700 bg-slate-950 p-4">
         <p className="text-sm font-medium">Monthly</p>
-        <p className="text-lg font-bold text-cyan-300">$2.99 / month</p>
+        <p className="text-2xl font-bold text-cyan-300">$2.99<small className="text-xs text-slate-400">/month</small></p>
+        <ul className="mt-2 space-y-1 text-xs text-slate-400">
+          <li>✓ Unlimited bills</li>
+          <li>✓ Full analytics</li>
+          <li>✓ Savings projections</li>
+          <li>✓ 22+ currencies</li>
+        </ul>
         <button
           type="button"
-          onClick={() => openWebsitePayment()}
-          className="mt-3 w-full rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300"
+          onClick={() => window.open("https://appclient2.gumroad.com/l/vhabmx", "_blank")}
+          className="mt-3 w-full rounded-lg bg-amber-400 px-3 py-2.5 text-sm font-bold text-slate-950 hover:bg-amber-300 active:scale-95 transition-all"
         >
-          Subscribe via Website →
+          Subscribe Now →
         </button>
       </div>
       <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-4">
-        <p className="text-sm font-medium">Yearly <span className="text-xs text-emerald-300">Best Value</span></p>
-        <p className="text-lg font-bold text-cyan-300">$19.99 / year</p>
-        <p className="text-xs text-emerald-300">Save {yearlyDiscountPercent}%</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium">Yearly</p>
+          <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300">BEST VALUE</span>
+        </div>
+        <p className="text-2xl font-bold text-cyan-300">$19.99<small className="text-xs text-slate-400">/year</small></p>
+        <p className="text-xs text-emerald-300 font-medium">Save 44% vs monthly!</p>
+        <ul className="mt-2 space-y-1 text-xs text-slate-400">
+          <li>✓ Everything in Monthly</li>
+          <li>✓ Pay once per year</li>
+          <li>✓ Priority support</li>
+          <li>✓ All future features</li>
+        </ul>
         <button
           type="button"
-          onClick={() => openWebsitePayment()}
-          className="mt-3 w-full rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300"
+          onClick={() => window.open("https://appclient2.gumroad.com/l/vhabmx", "_blank")}
+          className="mt-3 w-full rounded-lg bg-amber-400 px-3 py-2.5 text-sm font-bold text-slate-950 hover:bg-amber-300 active:scale-95 transition-all"
         >
-          Subscribe via Website →
+          Subscribe Now →
         </button>
       </div>
     </div>
-    <p className="mt-3 text-xs text-slate-400">
-      After payment, return to this app — your premium access will activate automatically.
-    </p>
+
+    {/* How it works */}
+    <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
+      <p className="text-xs font-semibold text-slate-300 mb-2">📱 How it works:</p>
+      <div className="space-y-1.5 text-xs text-slate-400">
+        <p>1️⃣ Tap "Subscribe Now" → opens payment page</p>
+        <p>2️⃣ Pay with PayPal, Credit Card, or Apple Pay</p>
+        <p>3️⃣ Return to this app — premium activates automatically!</p>
+      </div>
+      <p className="mt-2 text-[11px] text-amber-300">⚠️ Use the same email address you signed up with in this app.</p>
+    </div>
+
     <div className="mt-3 flex flex-wrap gap-2">
+      <button onClick={() => void refreshEntitlement()} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300">🔄 Check Premium Status</button>
       <button onClick={() => setShowPremiumPanel(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Close</button>
     </div>
   </section>
@@ -4103,14 +4142,14 @@ const smartTips = useMemo(() => {
               <div className="mt-3 space-y-3 text-sm text-slate-300">
                 <p>Privacy: account and subscription data is stored securely on our backend.</p>
                 <p>Data deletion: deleting account removes cloud profile permanently.</p>
-                <p>Terms: subscriptions are processed securely via PayPal or Gumroad. You can cancel anytime from your PayPal or Gumroad account.</p>
+                <p>Terms: subscriptions are processed securely via Gumroad. You can pay with PayPal, Credit Card, or Apple Pay. Cancel anytime from your Gumroad account.</p>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
-  onClick={() => window.open(WEBSITE_PAYMENT_URL, "_blank")}
+  onClick={() => window.open("https://appclient2.gumroad.com/l/vhabmx", "_blank")}
   className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300"
 >
-  Our Website
+  Manage Subscription
 </button>
                 <button onClick={() => setShowLegal(false)} className="rounded-lg border border-slate-600 px-3 py-2 text-sm">Close</button>
               </div>
