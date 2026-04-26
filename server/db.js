@@ -495,3 +495,47 @@ export async function getActiveEntitlement(userId) {
 
   return result.rows[0] ?? null;
 }
+
+// ═══════════════════════════════════════════════════════
+// PayPal & Gumroad subscription helpers
+// ═══════════════════════════════════════════════════════
+
+export async function upsertWebhookSubscription({
+  userId,
+  provider,
+  productId,
+  purchaseToken,
+  subscriptionState,
+  isAutoRenewing,
+  expiresAt,
+  rawPayload,
+}) {
+  const result = await pool.query(
+    `INSERT INTO subscriptions (user_id, provider, product_id, purchase_token, subscription_state, is_auto_renewing, is_refunded, acknowledged, started_at, expires_at, raw_payload)
+     VALUES ($1, $2, $3, $4, $5, $6, false, true, NOW(), $7, $8)
+     ON CONFLICT (purchase_token) DO UPDATE SET
+       subscription_state = EXCLUDED.subscription_state,
+       is_auto_renewing = EXCLUDED.is_auto_renewing,
+       expires_at = EXCLUDED.expires_at,
+       raw_payload = EXCLUDED.raw_payload,
+       updated_at = NOW()
+     RETURNING id, user_id, product_id, subscription_state, expires_at`,
+    [userId, provider, productId, purchaseToken, subscriptionState, isAutoRenewing, expiresAt, JSON.stringify(rawPayload)],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function getActiveWebhookSubscription(userId) {
+  const result = await pool.query(
+    `SELECT id, user_id, provider, product_id, subscription_state, expires_at, is_auto_renewing
+     FROM subscriptions
+     WHERE user_id = $1
+       AND provider IN ('paypal', 'gumroad')
+       AND subscription_state IN ('ACTIVE', 'active')
+       AND (expires_at IS NULL OR expires_at > NOW())
+     ORDER BY expires_at DESC NULLS LAST
+     LIMIT 1`,
+    [userId],
+  );
+  return result.rows[0] ?? null;
+}

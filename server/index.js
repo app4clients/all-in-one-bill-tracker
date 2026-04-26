@@ -33,8 +33,11 @@ import {
   setEmailVerificationToken,
   updateUserPasswordById,
   upsertSubscription,
+  upsertWebhookSubscription,
+  getActiveWebhookSubscription,
 } from "./db.js";
 import { verifySubscriptionToken } from "./googlePlay.js";
+import { createHmac } from "crypto";
 
 const app = express();
 const GOOGLE_KEY_TMP_PATH = "/tmp/gp-key.json";
@@ -126,6 +129,8 @@ const LOGIN_LOCK_MINUTES = Number(process.env.AUTH_LOGIN_LOCK_MINUTES ?? 15);
 const RESEND_API_KEY = process.env.RESEND_API_KEY?.trim();
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL?.trim();
 const APP_DISPLAY_NAME = process.env.APP_DISPLAY_NAME?.trim() || "All-in-One Bill Tracker";
+const PAYPAL_WEBHOOK_ID = process.env.PAYPAL_WEBHOOK_ID ?? "";
+const GUMROAD_WEBHOOK_SECRET = process.env.GUMROAD_WEBHOOK_SECRET ?? "";
 const resendClient = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
 function parseBlockedWords(raw) {
@@ -1159,25 +1164,205 @@ app.post("/api/billing/google-play/verify", async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════
+// PAYPAL WEBHOOK
+// ═══════════════════════════════════════════════════════
+app.post("/api/billing/paypal-webhook", express.raw({ type: "application/json" }), async (req, res) => {
+  try {
+    const rawBody = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+    const event = JSON.parse(rawBody);
+
+    const eventType = event.event_type ?? "";
+    const resource = event.resource ?? {};
+
+    const buyerEmail = resource?.subscriber?.email_address
+      ?? resource?.payer?.email_address
+      ?? resource?.custom_id
+      ?? "";
+
+    if (!buyerEmail) {
+      await saveBillingEvent({ userId: null, provider: "paypal", eventType: `paypal_${eventType}`, purchaseToken: resource?.id ?? "unknown", payload: event });
+      return res.status(200).json({ ok: true, message: "No buyer email found" });
+    }
+
+    const emailNormalized = normalizeEmail(buyerEmail);
+    const user = await getUserByEmail(emailNormalized);
+
+    if (!user?.id) {
+      await saveBillingEvent({ userId: null, provider: "paypal", eventType: `paypal_user_not_found`, purchaseToken: resource?.id ?? "unknown", payload: { ...event, attemptedEmail: buyerEmail } });
+      return res.status(200).json({ ok: true, message: "User not found for this email" });
+    }
+
+    const subscriptionId = resource?.id ?? resource?.billing_agreement_id ?? `paypal_${Date.now()}`;
+
+    const isActivation = [
+      "PAYMENT.SALE.COMPLETED",
+      "BILLING.SUBSCRIPTION.ACTIVATED",
+      "BILLING.SUBSCRIPTION.RE-ACTIVATED",
+      "CHECKOUT.ORDER.APPROVED",
+    ].includes(eventType);
+
+    const isDeactivation = [
+      "BILLING.SUBSCRIPTION.CANCELLED",
+      "BILLING.SUBSCRIPTION.EXPIRED",
+      "BILLING.SUBSCRIPTION.SUSPENDED",
+      "PAYMENT.SALE.REFUNDED",
+      "PAYMENT.SALE.REVERSED",
+    ].includes(eventType);
+
+    if (isActivation) {
+      const productId = resource?.plan_id ?? "premium_monthly";
+      const expiresAt = new Date(Date.now() + 35 * 24 * 60 * 60 * 1000);
+
+      await ensureUser(user.id);
+      await upsertWebhookSubscription({
+        userId: user.id,
+        provider: "paypal",
+        productId,
+        purchaseToken: subscriptionId,
+        subscriptionState: "ACTIVE",
+        isAutoRenewing: true,
+        expiresAt,
+        rawPayload: event,
+      });
+
+      await saveBillingEvent({ userId: user.id, provider: "paypal", eventType: `paypal_activated`, purchaseToken: subscriptionId, payload: event });
+    } else if (isDeactivation) {
+      await upsertWebhookSubscription({
+        userId: user.id,
+        provider: "paypal",
+        productId: resource?.plan_id ?? "premium_monthly",
+        purchaseToken: subscriptionId,
+        subscriptionState: "CANCELLED",
+        isAutoRenewing: false,
+        expiresAt: new Date(),
+        rawPayload: event,
+      });
+
+      await saveBillingEvent({ userId: user.id, provider: "paypal", eventType: `paypal_deactivated`, purchaseToken: subscriptionId, payload: event });
+    } else {
+      await saveBillingEvent({ userId: user.id, provider: "paypal", eventType: `paypal_${eventType}`, purchaseToken: subscriptionId, payload: event });
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (error) {
+    console.error("PayPal webhook error:", error);
+    return res.status(500).json({ ok: false, message: "Webhook processing failed" });
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// GUMROAD WEBHOOK
+// ═══════════════════════════════════════════════════════
+app.post("/api/billing/gumroad-webhook", express.urlencoded({ extended: true }), async (req, res) => {
+  try {
+    const payload = req.body ?? {};
+
+    if (GUMROAD_WEBHOOK_SECRET) {
+      const signature = payload.signature ?? "";
+      if (!signature) {
+        return res.status(401).json({ ok: false, message: "Missing signature" });
+      }
+      const base = [
+        payload.email ?? "",
+        payload.product_id ?? "",
+        payload.product_name ?? "",
+        payload.order_number ?? "",
+        payload.subscription_id ?? "",
+      ].join("|");
+      const expected = createHmac("sha256", GUMROAD_WEBHOOK_SECRET).update(base).digest("hex");
+      if (signature !== expected) {
+        return res.status(401).json({ ok: false, message: "Invalid signature" });
+      }
+    }
+
+    const buyerEmail = payload.email ?? "";
+    const isCancelled = payload.cancelled === "true" || payload.cancelled === true;
+    const isRefunded = payload.refunded === "true" || payload.refunded === true;
+
+    if (!buyerEmail) {
+      await saveBillingEvent({ userId: null, provider: "gumroad", eventType: "gumroad_no_email", purchaseToken: payload.subscription_id ?? payload.order_number ?? "unknown", payload });
+      return res.status(200).json({ ok: true });
+    }
+
+    const emailNormalized = normalizeEmail(buyerEmail);
+    const user = await getUserByEmail(emailNormalized);
+
+    if (!user?.id) {
+      await saveBillingEvent({ userId: null, provider: "gumroad", eventType: "gumroad_user_not_found", purchaseToken: payload.subscription_id ?? payload.order_number ?? "unknown", payload: { ...payload, attemptedEmail: buyerEmail } });
+      return res.status(200).json({ ok: true, message: "User not found" });
+    }
+
+    const gumroadToken = payload.subscription_id || payload.order_number || `gumroad_${Date.now()}`;
+    const productId = payload.product_id ?? "premium_monthly";
+
+    if (isCancelled || isRefunded) {
+      await upsertWebhookSubscription({
+        userId: user.id,
+        provider: "gumroad",
+        productId,
+        purchaseToken: gumroadToken,
+        subscriptionState: "CANCELLED",
+        isAutoRenewing: false,
+        expiresAt: new Date(),
+        rawPayload: payload,
+      });
+
+      await saveBillingEvent({ userId: user.id, provider: "gumroad", eventType: "gumroad_deactivated", purchaseToken: gumroadToken, payload });
+    } else {
+      const expiresAt = new Date(Date.now() + 35 * 24 * 60 * 60 * 1000);
+
+      await ensureUser(user.id);
+      await upsertWebhookSubscription({
+        userId: user.id,
+        provider: "gumroad",
+        productId,
+        purchaseToken: gumroadToken,
+        subscriptionState: "ACTIVE",
+        isAutoRenewing: true,
+        expiresAt,
+        rawPayload: payload,
+      });
+
+      await saveBillingEvent({ userId: user.id, provider: "gumroad", eventType: "gumroad_activated", purchaseToken: gumroadToken, payload });
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (error) {
+    console.error("Gumroad webhook error:", error);
+    return res.status(500).json({ ok: false, message: "Webhook processing failed" });
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// NEW ENTITLEMENT ENDPOINT (replaces old one)
+// ═══════════════════════════════════════════════════════
 app.get("/api/billing/entitlement/:appUserId", async (req, res) => {
   try {
     const appUserId = req.params.appUserId;
-    const subscriptions = await getSubscriptionsByUser(appUserId);
 
-    // On every app open, refresh all known purchase tokens from Google Play.
-    for (const sub of subscriptions) {
+    // 1. Check PayPal/Gumroad subscriptions first (fast, no external API call)
+    const webhookSub = await getActiveWebhookSubscription(appUserId);
+
+    if (webhookSub) {
+      return res.json({
+        ok: true,
+        premiumActive: true,
+        productId: webhookSub.product_id ?? null,
+        expiresAt: webhookSub.expires_at ?? null,
+        state: webhookSub.subscription_state ?? null,
+      });
+    }
+
+    // 2. Fallback: check Google Play subscriptions (for any existing GP users)
+    const subscriptions = await getSubscriptionsByUser(appUserId);
+    const googlePlaySubs = subscriptions.filter((sub) => sub.provider === "google_play");
+
+    for (const sub of googlePlaySubs) {
       try {
-        await syncOnePurchase({
-          appUserId,
-          purchaseToken: sub.purchase_token,
-        });
+        await syncOnePurchase({ appUserId, purchaseToken: sub.purchase_token });
       } catch {
-        await saveBillingEvent({
-          userId: appUserId,
-          eventType: "refresh_failed",
-          purchaseToken: sub.purchase_token,
-          payload: { reason: "google_refresh_failed" },
-        });
+        await saveBillingEvent({ userId: appUserId, eventType: "refresh_failed", purchaseToken: sub.purchase_token, payload: { reason: "google_refresh_failed" } });
       }
     }
 
@@ -1190,11 +1375,7 @@ app.get("/api/billing/entitlement/:appUserId", async (req, res) => {
       state: entitlement?.subscription_state ?? null,
     });
   } catch (error) {
-    return res.status(400).json({
-      ok: false,
-      code: "ENTITLEMENT_CHECK_FAILED",
-      message: error instanceof Error ? error.message : "Unknown error",
-    });
+    return res.status(400).json({ ok: false, code: "ENTITLEMENT_CHECK_FAILED", message: error instanceof Error ? error.message : "Unknown error" });
   }
 });
 

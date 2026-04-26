@@ -41,3 +41,38 @@ self.addEventListener("fetch", (event) => {
     })
   );
 });
+
+// ==================== PUSH NOTIFICATIONS ====================
+
+self.addEventListener("push", (event) => {
+  let data = { title: "All-in-One Bill Tracker", body: "You have a new notification." };
+
+  try {
+    const parsed = event.data ? event.data.json() : {};
+    if (parsed.title) data.title = parsed.title;
+    if (parsed.body) data.body = parsed.body;
+  } catch {
+    // Keep default data
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: "/images/tracker-logo.png",
+      badge: "/images/tracker-logo.png",
+      vibrate: [200, 100, 200],
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      if (clientList.length > 0) {
+        return clientList[0].focus();
+      }
+      return clients.openWindow("/");
+    })
+  );
+});

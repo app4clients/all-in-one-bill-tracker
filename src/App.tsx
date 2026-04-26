@@ -135,17 +135,16 @@ const FREE_SAVINGS_GOAL_LIMIT = 1;
 const FREE_CATEGORY_LIMIT_COUNT = 1;
 const BILLING_BACKEND_URL = (import.meta.env.VITE_BILLING_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 const AUTH_API_BASE_URL = (import.meta.env.VITE_AUTH_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
-const PLAY_SUBSCRIPTION_MANAGE_URL = "https://play.google.com/store/account/subscriptions";
-const RECOMMENDED_PRICES_MAD = {
-  monthly: 30,
-  yearly: 200,
-};
+const WEBSITE_PAYMENT_URL = "https://app4clients.com/";
+const RECOMMENDED_PRICES_USD = {
+           monthly: 2.99,
+           yearly: 19.99,
+         };
 
 const ANDROID_PACKAGE_NAME = "com.app4clients.allinonebilltracker";
 
-function openPlaySubscription(productId: "premium_monthly" | "premium_yearly") {
-  const url = `https://play.google.com/store/account/subscriptions?sku=${encodeURIComponent(productId)}&package=${encodeURIComponent(ANDROID_PACKAGE_NAME)}`;
-  window.open(url, "_blank");
+function openWebsitePayment() {
+  window.open(WEBSITE_PAYMENT_URL, "_blank");
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -222,36 +221,36 @@ const seedItems: BillItem[] = [
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const FALLBACK_CURRENCY_TO_MAD: Record<Currency, number> = {
-  MAD: 1,
-  USD: 10,
-  EUR: 10.8,
-  GBP: 12.6,
-  CAD: 7.4,
-  AUD: 6.5,
-  CHF: 11.3,
-  JPY: 0.067,
-  CNY: 1.38,
-  INR: 0.12,
-  BRL: 1.73,
-  MXN: 0.59,
-  TRY: 0.29,
-  ZAR: 0.54,
-  EGP: 0.20,
-  SAR: 2.67,
-  AED: 2.72,
-  TND: 3.24,
-  DZD: 0.075,
-  QAR: 2.75,
-  SEK: 0.97,
-  KRW: 0.0073,
+const FALLBACK_CURRENCY_TO_USD: Record<Currency, number> = {
+  USD: 1,
+EUR: 1.08,
+GBP: 1.27,
+CAD: 0.74,
+AUD: 0.65,
+CHF: 1.13,
+JPY: 0.0067,
+CNY: 0.14,
+INR: 0.012,
+BRL: 0.17,
+MXN: 0.059,
+TRY: 0.029,
+ZAR: 0.054,
+EGP: 0.020,
+SAR: 0.27,
+AED: 0.27,
+TND: 0.32,
+DZD: 0.0075,
+QAR: 0.27,
+SEK: 0.097,
+KRW: 0.00073,
+MAD: 0.10,
 };
 
-function toMAD(amount: number, currency: Currency, rates: Record<Currency, number>) {
+function toUSD(amount: number, currency: Currency, rates: Record<Currency, number>) {
   return amount * (rates[currency] || 1);
 }
 
-function fromMAD(amountMAD: number, currency: Currency, rates: Record<Currency, number>) {
+function fromUSD(amountMAD: number, currency: Currency, rates: Record<Currency, number>) {
   const divisor = rates[currency] || 1;
   return amountMAD / divisor;
 }
@@ -488,7 +487,7 @@ export default function App() {
   const [items, setItems] = useState<BillItem[]>([]);
   const [templates, setTemplates] = useState<Template[]>(DEFAULT_TEMPLATES);
   const [currency, setCurrency] = useState<Currency>("USD");
-  const [currencyToMAD, setCurrencyToMAD] = useState<Record<Currency, number>>(FALLBACK_CURRENCY_TO_MAD);
+  const [currencyToUSD, setcurrencyToUSD] = useState<Record<Currency, number>>(FALLBACK_CURRENCY_TO_USD);
   const [fxUpdatedAt, setFxUpdatedAt] = useState("");
   const [fxState, setFxState] = useState<FxState>("idle");
   const [budget, setBudget] = useState(5000);
@@ -644,7 +643,7 @@ useEffect(() => {
 const refreshExchangeRates = useCallback(async () => {
     setFxState("idle");
     try {
-      const response = await fetch("https://open.er-api.com/v6/latest/MAD");
+      const response = await fetch("https://open.er-api.com/v6/latest/USD");
       if (!response.ok) {
         throw new Error("Failed to fetch rates");
       }
@@ -652,19 +651,19 @@ const refreshExchangeRates = useCallback(async () => {
         rates?: Partial<Record<Currency, number>>;
       };
       const eurRate = data.rates?.EUR;
-      const usdRate = data.rates?.USD;
+      const madRate = data.rates?.MAD;
       const gbpRate = data.rates?.GBP;
-      if (!eurRate || !usdRate || !gbpRate || eurRate <= 0 || usdRate <= 0 || gbpRate <= 0) {
+      if (!eurRate || !madRate || !gbpRate || eurRate <= 0 || madRate <= 0 || gbpRate <= 0) {
         throw new Error("Invalid rate payload");
       }
       const rates = (data.rates ?? {}) as Record<string, number>;
-  const toMAD: Record<string, number> = { MAD: 1 };
-  for (const curr of Object.keys(FALLBACK_CURRENCY_TO_MAD)) {
-    if (curr === "MAD") continue;
+  const toUSD: Record<string, number> = { USD: 1 };
+  for (const curr of Object.keys(FALLBACK_CURRENCY_TO_USD)) {
+    if (curr === "USD") continue;
     const r = rates[curr];
-    toMAD[curr] = r && r > 0 ? 1 / r : FALLBACK_CURRENCY_TO_MAD[curr as Currency];
+    toUSD[curr] = r && r > 0 ? 1 / r : FALLBACK_CURRENCY_TO_USD[curr as Currency];
   }
-  setCurrencyToMAD(toMAD as Record<Currency, number>);
+  setcurrencyToUSD(toUSD as Record<Currency, number>);
       setFxUpdatedAt(new Date().toISOString());
       setFxState("live");
       setToastMessage("Exchange rates updated.");
@@ -796,7 +795,7 @@ const refreshExchangeRates = useCallback(async () => {
     setItems(readLS<BillItem[]>(userScopedKey(STORAGE_KEYS.items), seedItems));
     setTemplates(readLS<Template[]>(userScopedKey(STORAGE_KEYS.templates), DEFAULT_TEMPLATES));
     setCurrency(readLS<Currency>(userScopedKey(STORAGE_KEYS.currency), "USD"));
-    setCurrencyToMAD(readLS<Record<Currency, number>>(userScopedKey(STORAGE_KEYS.exchangeRates), FALLBACK_CURRENCY_TO_MAD));
+    setcurrencyToUSD(readLS<Record<Currency, number>>(userScopedKey(STORAGE_KEYS.exchangeRates), FALLBACK_CURRENCY_TO_USD));
     setFxUpdatedAt(readLS<string>(userScopedKey(STORAGE_KEYS.exchangeRatesUpdatedAt), ""));
     setBudget(readLS<number>(userScopedKey(STORAGE_KEYS.budget), 5000));
     setDueDaySoundEnabled(readLS<boolean>(userScopedKey(STORAGE_KEYS.dueDaySoundEnabled), true));
@@ -929,8 +928,8 @@ useEffect(() => {
     if (!appUserId) {
       return;
     }
-    localStorage.setItem(userScopedKey(STORAGE_KEYS.exchangeRates), JSON.stringify(currencyToMAD));
-  }, [currencyToMAD, appUserId]);
+    localStorage.setItem(userScopedKey(STORAGE_KEYS.exchangeRates), JSON.stringify(currencyToUSD));
+  }, [currencyToUSD, appUserId]);
 
   useEffect(() => {
     if (!appUserId) {
@@ -1006,8 +1005,8 @@ const formatMoney = useCallback((amountMAD: number) => {
       style: "currency",
       currency,
       maximumFractionDigits: noDecimal ? 0 : 2,
-    }).format(fromMAD(amountMAD, currency, currencyToMAD));
-  }, [currency, currencyToMAD]);
+    }).format(fromUSD(amountMAD, currency, currencyToUSD));
+  }, [currency, currencyToUSD]);
 
   const pushNotificationCenter = (entry: Omit<NotificationEntry, "id" | "createdAt">) => {
     setNotificationCenter((prev) => [{ id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...entry }, ...prev].slice(0, 60));
@@ -1106,8 +1105,8 @@ const formatMoney = useCallback((amountMAD: number) => {
     [items],
   );
   const budgetProgress = budget > 0 ? Math.min((monthlyTotal / budget) * 100, 100) : 0;
-  const yearlyPriceWithoutDiscount = RECOMMENDED_PRICES_MAD.monthly * 12;
-  const yearlyDiscountPercent = Math.round((1 - RECOMMENDED_PRICES_MAD.yearly / yearlyPriceWithoutDiscount) * 100);
+  const yearlyPriceWithoutDiscount = RECOMMENDED_PRICES_USD.monthly * 12;
+  const yearlyDiscountPercent = Math.round((1 - RECOMMENDED_PRICES_USD.yearly / yearlyPriceWithoutDiscount) * 100);
 
 const CATEGORY_COLORS = [
   "#06b6d4", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6",
@@ -1662,7 +1661,7 @@ const incomeCategoryTotals = useMemo(() => {
     }
     setEditingItemId(null);
     setInlineEditId(id);
-    setInlineDraft({ amount: fromMAD(selectedItem.amount, currency, currencyToMAD).toFixed(2), dueDay: selectedItem.dueDay.toString() });
+    setInlineDraft({ amount: fromUSD(selectedItem.amount, currency, currencyToUSD).toFixed(2), dueDay: selectedItem.dueDay.toString() });
   };
 
   const cancelInlineEdit = () => {
@@ -1682,7 +1681,7 @@ const incomeCategoryTotals = useMemo(() => {
         item.id === id
           ? {
               ...item,
-              amount: toMAD(nextAmount, currency, currencyToMAD),
+              amount: toUSD(nextAmount, currency, currencyToUSD),
               dueDay: nextDueDay,
             }
           : item,
@@ -2227,7 +2226,7 @@ const incomeCategoryTotals = useMemo(() => {
       item.name,
       item.type,
       item.category,
-      fromMAD(item.amount, currency, currencyToMAD).toFixed(2),
+      fromUSD(item.amount, currency, currencyToUSD).toFixed(2),
       String(item.dueDay),
       String(item.reminderDays),
       isPaidThisMonth(item) ? "yes" : "no",
@@ -2237,10 +2236,10 @@ const incomeCategoryTotals = useMemo(() => {
     const summaryRows = [
       [],
       ["--- SUMMARY ---"],
-      [`Total Bills (${currency})`, fromMAD(monthlyTotal, currency, currencyToMAD).toFixed(2)],
-      [`Total Paid (${currency})`, fromMAD(monthlyPaid, currency, currencyToMAD).toFixed(2)],
-      [`Total Income (${currency})`, fromMAD(monthlyIncome, currency, currencyToMAD).toFixed(2)],
-      [`Balance (${currency})`, fromMAD(balance, currency, currencyToMAD).toFixed(2)],
+      [`Total Bills (${currency})`, fromUSD(monthlyTotal, currency, currencyToUSD).toFixed(2)],
+      [`Total Paid (${currency})`, fromUSD(monthlyPaid, currency, currencyToUSD).toFixed(2)],
+      [`Total Income (${currency})`, fromUSD(monthlyIncome, currency, currencyToUSD).toFixed(2)],
+      [`Balance (${currency})`, fromUSD(balance, currency, currencyToUSD).toFixed(2)],
       ["Savings Rate", `${savingsRate}%`],
       ["Budget Progress", `${budgetProgress.toFixed(0)}%`],
       ["# Accounts", String(accounts.length)],
@@ -3205,10 +3204,10 @@ const smartTips = useMemo(() => {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Name" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
                   <div className="space-y-2">
-                    <input type="number" min={0} step="0.01" value={form.amount > 0 ? Number(fromMAD(form.amount, currency, currencyToMAD).toFixed(2)) : ""} onChange={(e) => setForm((prev) => ({ ...prev, amount: toMAD(Number(e.target.value || 0), currency, currencyToMAD) }))} placeholder={`Amount (${currency})`} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+                    <input type="number" min={0} step="0.01" value={form.amount > 0 ? Number(fromUSD(form.amount, currency, currencyToUSD).toFixed(2)) : ""} onChange={(e) => setForm((prev) => ({ ...prev, amount: toUSD(Number(e.target.value || 0), currency, currencyToUSD) }))} placeholder={`Amount (${currency})`} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
                     <div className="flex flex-wrap gap-1">
                       {[50, 100, 200, 300, 500, 1000].map((preset) => (
-                        <button key={preset} type="button" onClick={() => setForm((prev) => ({ ...prev, amount: toMAD(preset, currency, currencyToMAD) }))} className="rounded-md border border-slate-700 px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800">{preset}</button>
+                        <button key={preset} type="button" onClick={() => setForm((prev) => ({ ...prev, amount: toUSD(preset, currency, currencyToUSD) }))} className="rounded-md border border-slate-700 px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800">{preset}</button>
                       ))}
                     </div>
                   </div>
@@ -3593,7 +3592,7 @@ const smartTips = useMemo(() => {
                     {categories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
                   </select>
                   <div className="flex gap-2">
-                    <input type="number" min={0} step="0.01" value={newLimitAmount > 0 ? Number(fromMAD(newLimitAmount, currency, currencyToMAD).toFixed(2)) : ""} onChange={(e) => setNewLimitAmount(toMAD(Number(e.target.value || 0), currency, currencyToMAD))} placeholder={`Limit (${currency})`} className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+                    <input type="number" min={0} step="0.01" value={newLimitAmount > 0 ? Number(fromUSD(newLimitAmount, currency, currencyToUSD).toFixed(2)) : ""} onChange={(e) => setNewLimitAmount(toUSD(Number(e.target.value || 0), currency, currencyToUSD))} placeholder={`Limit (${currency})`} className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
                     <button onClick={addCategoryLimit} className="rounded-lg bg-cyan-500 px-4 py-2 font-semibold text-slate-950">Set</button>
                   </div>
                 </div>
@@ -3658,7 +3657,7 @@ const smartTips = useMemo(() => {
               )}
               <div className="mt-3 grid gap-2 border-t border-slate-800 pt-3 sm:grid-cols-4">
                 <input value={lateFeeForm.name} onChange={(e) => setLateFeeForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Bill name" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
-                <input type="number" min={0} step="0.01" value={lateFeeForm.feePerDay > 0 ? Number(fromMAD(lateFeeForm.feePerDay, currency, currencyToMAD).toFixed(2)) : ""} onChange={(e) => setLateFeeForm((prev) => ({ ...prev, feePerDay: toMAD(Number(e.target.value || 0), currency, currencyToMAD) }))} placeholder={`Fee/day (${currency})`} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+                <input type="number" min={0} step="0.01" value={lateFeeForm.feePerDay > 0 ? Number(fromUSD(lateFeeForm.feePerDay, currency, currencyToUSD).toFixed(2)) : ""} onChange={(e) => setLateFeeForm((prev) => ({ ...prev, feePerDay: toUSD(Number(e.target.value || 0), currency, currencyToUSD) }))} placeholder={`Fee/day (${currency})`} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
                 <input type="number" min={0} max={30} value={lateFeeForm.graceDays || ""} onChange={(e) => setLateFeeForm((prev) => ({ ...prev, graceDays: Number(e.target.value || 0) }))} placeholder="Grace days" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
                 <button onClick={addLateFeeRule} className="rounded-lg bg-cyan-500 px-4 py-2 font-semibold text-slate-950">Add Rule</button>
               </div>
@@ -3686,7 +3685,7 @@ const smartTips = useMemo(() => {
 </h2>
               <div className="grid gap-2 sm:grid-cols-3">
                 <input value={incomeForm.label} onChange={(e) => setIncomeForm((prev) => ({ ...prev, label: e.target.value }))} placeholder="Income label" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
-                <input type="number" min={0} step="0.01" value={incomeForm.amount > 0 ? Number(fromMAD(incomeForm.amount, currency, currencyToMAD).toFixed(2)) : ""} onChange={(e) => setIncomeForm((prev) => ({ ...prev, amount: toMAD(Number(e.target.value || 0), currency, currencyToMAD) }))} placeholder={`Amount (${currency})`} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+                <input type="number" min={0} step="0.01" value={incomeForm.amount > 0 ? Number(fromUSD(incomeForm.amount, currency, currencyToUSD).toFixed(2)) : ""} onChange={(e) => setIncomeForm((prev) => ({ ...prev, amount: toUSD(Number(e.target.value || 0), currency, currencyToUSD) }))} placeholder={`Amount (${currency})`} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
                 <div className="flex gap-2">
                   <select value={incomeForm.category} onChange={(e) => setIncomeForm((prev) => ({ ...prev, category: e.target.value }))} className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
                     <option value="Salary">Salary</option><option value="Freelance">Freelance</option><option value="Business">Business</option><option value="Investment">Investment</option><option value="Gift">Gift</option><option value="Other">Other</option>
@@ -3742,7 +3741,7 @@ const smartTips = useMemo(() => {
                           <div><p className="text-sm font-medium">{acc.name}</p><p className="text-xs text-slate-400 capitalize">{acc.type}</p></div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <button onClick={() => { const input = prompt(`Update balance for "${acc.name}" (${currency}):`, String(fromMAD(acc.balance, currency, currencyToMAD).toFixed(2))); if (input !== null) { const val = toMAD(Number(input), currency, currencyToMAD); if (Number.isFinite(val)) updateAccountBalance(acc.id, val); } }} className={`text-sm font-bold ${acc.balance >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatMoney(acc.balance)}</button>
+                          <button onClick={() => { const input = prompt(`Update balance for "${acc.name}" (${currency}):`, String(fromUSD(acc.balance, currency, currencyToUSD).toFixed(2))); if (input !== null) { const val = toUSD(Number(input), currency, currencyToUSD); if (Number.isFinite(val)) updateAccountBalance(acc.id, val); } }} className={`text-sm font-bold ${acc.balance >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatMoney(acc.balance)}</button>
                           <button onClick={() => removeAccount(acc.id)} className="text-xs text-red-300 hover:text-red-200">✕</button>
                         </div>
                       </div>
@@ -3755,7 +3754,7 @@ const smartTips = useMemo(() => {
                 <select value={accountForm.type} onChange={(e) => setAccountForm((prev) => ({ ...prev, type: e.target.value as Account["type"] }))} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
                   <option value="cash">💵 Cash</option><option value="bank">🏦 Bank</option><option value="card">💳 Card</option><option value="mobile">📱 Mobile</option><option value="other">💰 Other</option>
                 </select>
-                <input type="number" min={0} step="0.01" value={accountForm.balance > 0 ? Number(fromMAD(accountForm.balance, currency, currencyToMAD).toFixed(2)) : ""} onChange={(e) => setAccountForm((prev) => ({ ...prev, balance: toMAD(Number(e.target.value || 0), currency, currencyToMAD) }))} placeholder={`Balance (${currency})`} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+                <input type="number" min={0} step="0.01" value={accountForm.balance > 0 ? Number(fromUSD(accountForm.balance, currency, currencyToUSD).toFixed(2)) : ""} onChange={(e) => setAccountForm((prev) => ({ ...prev, balance: toUSD(Number(e.target.value || 0), currency, currencyToUSD) }))} placeholder={`Balance (${currency})`} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
                 <div className="flex items-center gap-2"><label className="text-xs text-slate-400">Color</label><input type="color" value={accountForm.color} onChange={(e) => setAccountForm((prev) => ({ ...prev, color: e.target.value }))} className="h-9 w-9 cursor-pointer rounded border border-slate-700" /></div>
                 <button onClick={addAccount} className="rounded-lg bg-cyan-500 px-4 py-2 font-semibold text-slate-950">Add</button>
               </div>
@@ -3777,7 +3776,7 @@ const smartTips = useMemo(() => {
   </InfoModal>
 </h2>
                 <label className="text-sm text-slate-400">Monthly budget</label>
-                <input type="number" min={0} value={budget > 0 ? Number(fromMAD(budget, currency, currencyToMAD).toFixed(2)) : ""} onChange={(e) => setBudget(toMAD(Number(e.target.value || 0), currency, currencyToMAD))} placeholder={`Budget (${currency})`} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+                <input type="number" min={0} value={budget > 0 ? Number(fromUSD(budget, currency, currencyToUSD).toFixed(2)) : ""} onChange={(e) => setBudget(toUSD(Number(e.target.value || 0), currency, currencyToUSD))} placeholder={`Budget (${currency})`} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
                 <div className="h-3 overflow-hidden rounded-full bg-slate-800">
                   <div className={`h-full ${budgetProgress >= 100 ? "bg-red-500" : budgetProgress >= 80 ? "bg-amber-400" : "bg-emerald-500"}`} style={{ width: `${Math.max(6, Math.min(budgetProgress, 100))}%` }} />
                 </div>
@@ -3817,7 +3816,7 @@ const smartTips = useMemo(() => {
                           <div className="flex items-center justify-between">
                             <div><p className="font-medium">{isComplete ? "✅ " : "🎯 "}{goal.label}</p><p className="text-xs text-slate-400">{formatMoney(goal.savedAmount)} / {formatMoney(goal.targetAmount)}</p></div>
                             <div className="flex items-center gap-2">
-                              {!isComplete && <button onClick={() => { const input = prompt(`Add to "${goal.label}" (${currency}):`, "100"); if (input) { const val = toMAD(Number(input), currency, currencyToMAD); if (val > 0) addToSavings(goal.id, val); } }} className="rounded-lg border border-cyan-500 px-2 py-1 text-xs text-cyan-300 hover:bg-cyan-500/20">+ Add</button>}
+                              {!isComplete && <button onClick={() => { const input = prompt(`Add to "${goal.label}" (${currency}):`, "100"); if (input) { const val = toUSD(Number(input), currency, currencyToUSD); if (val > 0) addToSavings(goal.id, val); } }} className="rounded-lg border border-cyan-500 px-2 py-1 text-xs text-cyan-300 hover:bg-cyan-500/20">+ Add</button>}
                               <button onClick={() => removeSavingsGoal(goal.id)} className="text-xs text-red-300 hover:text-red-200">✕</button>
                             </div>
                           </div>
@@ -3832,7 +3831,7 @@ const smartTips = useMemo(() => {
                 )}
                 <div className="mt-3 grid gap-2 border-t border-slate-800 pt-3 sm:grid-cols-4">
                   <input value={savingsForm.label} onChange={(e) => setSavingsForm((prev) => ({ ...prev, label: e.target.value }))} placeholder="Goal name" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
-                  <input type="number" min={0} step="0.01" value={savingsForm.targetAmount > 0 ? Number(fromMAD(savingsForm.targetAmount, currency, currencyToMAD).toFixed(2)) : ""} onChange={(e) => setSavingsForm((prev) => ({ ...prev, targetAmount: toMAD(Number(e.target.value || 0), currency, currencyToMAD) }))} placeholder={`Target (${currency})`} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+                  <input type="number" min={0} step="0.01" value={savingsForm.targetAmount > 0 ? Number(fromUSD(savingsForm.targetAmount, currency, currencyToUSD).toFixed(2)) : ""} onChange={(e) => setSavingsForm((prev) => ({ ...prev, targetAmount: toUSD(Number(e.target.value || 0), currency, currencyToUSD) }))} placeholder={`Target (${currency})`} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
                   <div className="flex gap-2">
                     <input type="date" value={savingsForm.deadline} onChange={(e) => setSavingsForm((prev) => ({ ...prev, deadline: e.target.value }))} className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
                     <button onClick={addSavingsGoal} className="rounded-lg bg-cyan-500 px-4 py-2 font-semibold text-slate-950">Add</button>
@@ -3875,14 +3874,14 @@ const smartTips = useMemo(() => {
                     const progress = goal.targetAmount > 0 ? (goal.savedAmount / goal.targetAmount) * 100 : 0;
 
                     const monthlySavingsOptions = [
-                      fromMAD(Math.round(remaining / 3), currency, currencyToMAD),
-                      fromMAD(Math.round(remaining / 6), currency, currencyToMAD),
-                      fromMAD(Math.round(remaining / 12), currency, currencyToMAD),
+                      fromUSD(Math.round(remaining / 3), currency, currencyToUSD),
+                      fromUSD(Math.round(remaining / 6), currency, currencyToUSD),
+                      fromUSD(Math.round(remaining / 12), currency, currencyToUSD),
                     ].map((v) => Math.round(v));
 
                     const deadlineDate = goal.deadline ? new Date(goal.deadline) : null;
                     const monthsLeft = deadlineDate ? Math.max(1, Math.ceil((deadlineDate.getTime() - Date.now()) / (30 * DAY_MS))) : null;
-                    const suggestedMonthly = monthsLeft ? fromMAD(Math.ceil(remaining / monthsLeft), currency, currencyToMAD) : null;
+                    const suggestedMonthly = monthsLeft ? fromUSD(Math.ceil(remaining / monthsLeft), currency, currencyToUSD) : null;
 
                     return (
                       <div key={goal.id} className="rounded-lg border border-slate-800 bg-slate-950 p-4">
@@ -3964,15 +3963,44 @@ const smartTips = useMemo(() => {
         {activeTab === "settings" && (
           <>
             {showPremiumPanel && (
-              <section className="mb-6 rounded-xl border border-amber-500/40 bg-slate-900 p-4">
-                <h2 className="text-lg font-semibold text-amber-300">Premium Plans</h2>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <button type="button" onClick={() => openPlaySubscription("premium_monthly")} className="rounded-lg border border-slate-700 bg-slate-950 p-3 text-left transition hover:border-cyan-400"><p className="text-sm font-medium">Monthly</p><p className="text-sm text-cyan-300">{formatMoney(RECOMMENDED_PRICES_MAD.monthly)} / month</p></button>
-                  <button type="button" onClick={() => openPlaySubscription("premium_yearly")} className="rounded-lg border border-slate-700 bg-slate-950 p-3 text-left transition hover:border-cyan-400"><p className="text-sm font-medium">Yearly</p><p className="text-sm text-cyan-300">{formatMoney(RECOMMENDED_PRICES_MAD.yearly)} / year</p><p className="text-xs text-emerald-300">Save {yearlyDiscountPercent}%</p></button>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2"><button onClick={() => setShowPremiumPanel(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Close</button></div>
-              </section>
-            )}
+  <section className="mb-6 rounded-xl border border-amber-500/40 bg-slate-900 p-4">
+    <h2 className="text-lg font-semibold text-amber-300">💎 Upgrade to Premium</h2>
+    <p className="mt-2 text-sm text-slate-300">
+      You'll be redirected to our secure website to complete payment via PayPal or Gumroad.
+    </p>
+    <div className="mt-4 grid gap-2 sm:grid-cols-2">
+      <div className="rounded-lg border border-slate-700 bg-slate-950 p-4">
+        <p className="text-sm font-medium">Monthly</p>
+        <p className="text-lg font-bold text-cyan-300">$2.99 / month</p>
+        <button
+          type="button"
+          onClick={() => openWebsitePayment()}
+          className="mt-3 w-full rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300"
+        >
+          Subscribe via Website →
+        </button>
+      </div>
+      <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-4">
+        <p className="text-sm font-medium">Yearly <span className="text-xs text-emerald-300">Best Value</span></p>
+        <p className="text-lg font-bold text-cyan-300">$19.99 / year</p>
+        <p className="text-xs text-emerald-300">Save {yearlyDiscountPercent}%</p>
+        <button
+          type="button"
+          onClick={() => openWebsitePayment()}
+          className="mt-3 w-full rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300"
+        >
+          Subscribe via Website →
+        </button>
+      </div>
+    </div>
+    <p className="mt-3 text-xs text-slate-400">
+      After payment, return to this app — your premium access will activate automatically.
+    </p>
+    <div className="mt-3 flex flex-wrap gap-2">
+      <button onClick={() => setShowPremiumPanel(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Close</button>
+    </div>
+  </section>
+)}
 
             {/* Subscription Status */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
@@ -3980,7 +4008,12 @@ const smartTips = useMemo(() => {
               <p className="mt-2 text-sm text-slate-300">Status: {entitlement.loading ? "Checking" : canUsePremiumFeatures ? "Premium active" : "Free plan"}{entitlement.productId ? ` · ${entitlement.productId}` : ""}{entitlement.expiresAt ? ` · Renewal ${new Date(entitlement.expiresAt).toLocaleDateString()}` : ""}</p>
               {entitlement.error && <p className="mt-1 text-xs text-red-300">{entitlement.error}</p>}
               <div className="mt-3 flex flex-wrap gap-2">
-                <button onClick={() => window.open(PLAY_SUBSCRIPTION_MANAGE_URL, "_blank")} className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300">Manage on Google Play</button>
+                <button
+  onClick={() => window.open(WEBSITE_PAYMENT_URL, "_blank")}
+  className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300"
+>
+  Manage Subscription (PayPal / Gumroad)
+</button>
                 <button onClick={() => void refreshEntitlement()} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300">Refresh</button>
                 {!canUsePremiumFeatures && <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950">Upgrade</button>}
               </div>
@@ -4070,10 +4103,15 @@ const smartTips = useMemo(() => {
               <div className="mt-3 space-y-3 text-sm text-slate-300">
                 <p>Privacy: account and subscription data is stored securely on our backend.</p>
                 <p>Data deletion: deleting account removes cloud profile permanently.</p>
-                <p>Terms: subscription purchases are managed by Google Play policies.</p>
+                <p>Terms: subscriptions are processed securely via PayPal or Gumroad. You can cancel anytime from your PayPal or Gumroad account.</p>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <button onClick={() => window.open(PLAY_SUBSCRIPTION_MANAGE_URL, "_blank")} className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300">Google Play</button>
+                <button
+  onClick={() => window.open(WEBSITE_PAYMENT_URL, "_blank")}
+  className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300"
+>
+  Our Website
+</button>
                 <button onClick={() => setShowLegal(false)} className="rounded-lg border border-slate-600 px-3 py-2 text-sm">Close</button>
               </div>
             </div>
