@@ -1,6 +1,7 @@
-const express = require("express");
-const { Pool } = require("pg");
+import express from "express";
+import pg from "pg";
 
+const { Pool } = pg;
 const router = express.Router();
 
 const pool = new Pool({
@@ -8,32 +9,24 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-// POST /api/license/activate
-// body: { appUserId: string, email: string, licenseCode: string }
 router.post("/activate", async (req, res) => {
   const client = await pool.connect();
-
   try {
     const appUserId = String(req.body.appUserId || "").trim();
     const email = String(req.body.email || "").trim().toLowerCase();
     const licenseCode = String(req.body.licenseCode || "").trim().toUpperCase();
 
     if (!appUserId || !email || !licenseCode) {
-      return res.status(400).json({
-        ok: false,
-        message: "appUserId, email and licenseCode are required",
-      });
+      return res.status(400).json({ ok: false, message: "appUserId, email and licenseCode are required" });
     }
 
     await client.query("BEGIN");
 
     const q = await client.query(
-      `
-      select id, code, customer_email, app_user_id, plan, status, expires_at
-      from licenses
-      where upper(code) = upper($1)
-      limit 1
-      `,
+      `select id, code, customer_email, app_user_id, plan, status, expires_at
+       from licenses
+       where upper(code) = upper($1)
+       limit 1`,
       [licenseCode]
     );
 
@@ -66,12 +59,10 @@ router.post("/activate", async (req, res) => {
     }
 
     const updated = await client.query(
-      `
-      update licenses
-      set app_user_id = $1, updated_at = now()
-      where id = $2
-      returning plan, expires_at
-      `,
+      `update licenses
+       set app_user_id = $1, updated_at = now()
+       where id = $2
+       returning plan, expires_at`,
       [appUserId, lic.id]
     );
 
@@ -93,35 +84,23 @@ router.post("/activate", async (req, res) => {
   }
 });
 
-// GET /api/billing/entitlement/:appUserId
 router.get("/entitlement/:appUserId", async (req, res) => {
   const client = await pool.connect();
-
   try {
     const appUserId = String(req.params.appUserId || "").trim();
-    if (!appUserId) {
-      return res.status(400).json({ ok: false, message: "appUserId is required" });
-    }
+    if (!appUserId) return res.status(400).json({ ok: false, message: "appUserId is required" });
 
     const q = await client.query(
-      `
-      select plan, status, expires_at
-      from licenses
-      where app_user_id = $1
-        and status = 'active'
-      order by updated_at desc
-      limit 1
-      `,
+      `select plan, status, expires_at
+       from licenses
+       where app_user_id = $1 and status = 'active'
+       order by updated_at desc
+       limit 1`,
       [appUserId]
     );
 
     if (q.rowCount === 0) {
-      return res.json({
-        ok: true,
-        premiumActive: false,
-        productId: null,
-        expiresAt: null,
-      });
+      return res.json({ ok: true, premiumActive: false, productId: null, expiresAt: null });
     }
 
     const lic = q.rows[0];
@@ -143,11 +122,11 @@ router.get("/entitlement/:appUserId", async (req, res) => {
       expiresAt: lic.expires_at,
     });
   } catch (error) {
-    console.error("GET /api/license/entitlement/:appUserId error:", error);
+    console.error("GET /api/license/entitlement error:", error);
     return res.status(500).json({ ok: false, message: "Server error" });
   } finally {
     client.release();
   }
 });
 
-module.exports = router;
+export default router;

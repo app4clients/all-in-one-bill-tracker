@@ -1,3 +1,7 @@
+import express from "express";
+import crypto from "crypto";
+import pg from "pg";
+
 const express = require("express");
 const crypto = require("crypto");
 const { Pool } = require("pg");
@@ -92,3 +96,4 @@ router.post("/gumroad", async (req, res) => {
 });
 
 module.exports = router;
+export default router;

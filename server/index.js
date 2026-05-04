@@ -1,3 +1,5 @@
+import licenseRoutes from "./routes/license.routes.js";
+import gumroadWebhookRoutes from "./routes/gumroad.webhook.routes.js";
 import { writeFileSync } from "fs";
 import "dotenv/config";
 import cors from "cors";
@@ -1386,7 +1388,7 @@ app.listen(port, () => {
   console.log(`Billing backend listening on ${port}`);
 });
 
-app.use("/api/license", require("./routes/license.routes"));
+app.use("/api/license", licenseRoutes);
 
 app.get("/api/billing/entitlement/:appUserId", async (req, res) => {
   try {
@@ -1402,4 +1404,4 @@ app.get("/api/billing/entitlement/:appUserId", async (req, res) => {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use("/api/webhooks", require("./routes/gumroad.webhook.routes"));
+app.use("/api/webhooks", gumroadWebhookRoutes);
