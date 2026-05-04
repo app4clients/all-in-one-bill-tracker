@@ -1,5 +1,4 @@
 import licenseRoutes from "./routes/license.routes.js";
-import gumroadWebhookRoutes from "./routes/gumroad.webhook.routes.js";
 import { writeFileSync } from "fs";
 import "dotenv/config";
 import cors from "cors";
@@ -1381,6 +1380,9 @@ app.get("/api/billing/entitlement/:appUserId", async (req, res) => {
   }
 });
 
+
+app.use("/api/license", licenseRoutes);
+
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, () => {
   // Keep startup log minimal for production logs.
@@ -1388,20 +1390,5 @@ app.listen(port, () => {
   console.log(`Billing backend listening on ${port}`);
 });
 
-app.use("/api/license", licenseRoutes);
 
-app.get("/api/billing/entitlement/:appUserId", async (req, res) => {
-  try {
-    // Redirige vers la route licence interne
-    req.url = `/entitlement/${req.params.appUserId}`;
-    return require("./routes/license.routes")(req, res, () => {});
-  } catch (error) {
-    console.error("billing entitlement alias error:", error);
-    return res.status(500).json({ ok: false, message: "Server error" });
-  }
-});
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-app.use("/api/webhooks", gumroadWebhookRoutes);

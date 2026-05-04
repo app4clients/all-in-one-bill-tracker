@@ -2,10 +2,7 @@ import express from "express";
 import crypto from "crypto";
 import pg from "pg";
 
-const express = require("express");
-const crypto = require("crypto");
-const { Pool } = require("pg");
-
+const { Pool } = pg;
 const router = express.Router();
 
 const pool = new Pool({
@@ -38,12 +35,11 @@ router.post("/gumroad", async (req, res) => {
     const refunded = String(req.body.refunded || "false") === "true";
     const chargebacked = String(req.body.chargebacked || "false") === "true";
 
-    if (!email) {
-      return res.status(400).send("missing email");
-    }
+    if (!email) return res.status(400).send("missing email");
 
     let plan = "monthly";
     let durationDays = 30;
+
     if (productName.includes("year") || recurrence.includes("year")) {
       plan = "yearly";
       durationDays = 365;
@@ -60,7 +56,8 @@ router.post("/gumroad", async (req, res) => {
     }
 
     const existing = await pool.query(
-      `select id from licenses
+      `select id
+       from licenses
        where lower(customer_email) = lower($1) and status = 'active'
        order by updated_at desc
        limit 1`,
@@ -95,5 +92,4 @@ router.post("/gumroad", async (req, res) => {
   }
 });
 
-module.exports = router;
 export default router;
