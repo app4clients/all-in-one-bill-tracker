@@ -1385,3 +1385,21 @@ app.listen(port, () => {
   // eslint-disable-next-line no-console
   console.log(`Billing backend listening on ${port}`);
 });
+
+app.use("/api/license", require("./routes/license.routes"));
+
+app.get("/api/billing/entitlement/:appUserId", async (req, res) => {
+  try {
+    // Redirige vers la route licence interne
+    req.url = `/entitlement/${req.params.appUserId}`;
+    return require("./routes/license.routes")(req, res, () => {});
+  } catch (error) {
+    console.error("billing entitlement alias error:", error);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+});
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+app.use("/api/webhooks", require("./routes/gumroad.webhook.routes"));

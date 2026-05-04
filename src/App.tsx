@@ -1,4 +1,5 @@
 import { useCallback, FormEvent, useEffect, useMemo, useState } from "react";
+import { IS_PLAY, IS_DIRECT } from "./config/channel";
 
 type ItemType = "bill" | "subscription";
 type StatusFilter = "all" | "dueSoon" | "paid" | "unpaid";
@@ -135,6 +136,7 @@ const FREE_SAVINGS_GOAL_LIMIT = 1;
 const FREE_CATEGORY_LIMIT_COUNT = 1;
 const BILLING_BACKEND_URL = (import.meta.env.VITE_BILLING_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 const AUTH_API_BASE_URL = (import.meta.env.VITE_AUTH_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
+<<<<<<< HEAD
 const WEBSITE_PAYMENT_URL = "https://app4clients.com/";
 const RECOMMENDED_PRICES_USD = {
            monthly: 2.99,
@@ -146,6 +148,8 @@ const ANDROID_PACKAGE_NAME = "com.app4clients.allinonebilltracker";
 function openWebsitePayment() {
   window.open(WEBSITE_PAYMENT_URL, "_blank");
 }
+=======
+>>>>>>> 57fc7d4 (licence)
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const DEFAULT_BLOCKED_USERNAME_WORDS = ["sex", "porn", "xxx", "nude", "adult", "escort", "camgirl", "onlyfans"];
@@ -448,6 +452,12 @@ function InfoModal({ title, children }: { title: string; children: React.ReactNo
 }
 
 export default function App() {
+  const [licenseCode, setLicenseCode] = useState("");
+const [licenseSubmitting, setLicenseSubmitting] = useState(false);
+const canShowExternalUpgrade = IS_DIRECT;
+const isFreeLimitedMode = IS_PLAY;
+const maxItems = isFreeLimitedMode ? 8 : Number.POSITIVE_INFINITY;
+const maxCategories = isFreeLimitedMode ? 3 : Number.POSITIVE_INFINITY;
   const [showWelcomeSplash, setShowWelcomeSplash] = useState(true);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authLoading, setAuthLoading] = useState(true);
@@ -536,7 +546,7 @@ const [accountForm, setAccountForm] = useState({ name: "", type: "bank" as Accou
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [inlineEditId, setInlineEditId] = useState<string | null>(null);
   const [inlineDraft, setInlineDraft] = useState<{ amount: string; dueDay: string }>({ amount: "", dueDay: "" });
-  const [showPremiumPanel, setShowPremiumPanel] = useState(false);
+  
   const [showLegal, setShowLegal] = useState(false);
   const [showDeleteAccountDialog, setShowDeleteAccountDialog] = useState(false);
   const [deleteAccountConfirmInput, setDeleteAccountConfirmInput] = useState("");
@@ -832,7 +842,7 @@ const refreshEntitlement = useCallback(async () => {
   try {
     setEntitlement((prev) => ({ ...prev, loading: true, error: "" }));
     const response = await fetch(
-      `${BILLING_BACKEND_URL}/api/billing/entitlement/${encodeURIComponent(appUserId)}`
+     `${BILLING_BACKEND_URL}/api/license/entitlement/${encodeURIComponent(appUserId)}`
     );
     if (!response.ok) {
       throw new Error("Entitlement request failed");
@@ -1105,9 +1115,13 @@ const formatMoney = useCallback((amountMAD: number) => {
     [items],
   );
   const budgetProgress = budget > 0 ? Math.min((monthlyTotal / budget) * 100, 100) : 0;
+<<<<<<< HEAD
   const yearlyPriceWithoutDiscount = RECOMMENDED_PRICES_USD.monthly * 12;
   const yearlyDiscountPercent = Math.round((1 - RECOMMENDED_PRICES_USD.yearly / yearlyPriceWithoutDiscount) * 100);
 
+=======
+  
+>>>>>>> 57fc7d4 (licence)
 const CATEGORY_COLORS = [
   "#06b6d4", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6",
   "#ec4899", "#f97316", "#14b8a6", "#6366f1", "#84cc16",
@@ -1152,7 +1166,7 @@ const monthlyIncome = useMemo(() => incomes.reduce((sum, i) => sum + i.amount, 0
       return;
     }
     if (!entitlement.premiumActive && savingsGoals.length >= FREE_SAVINGS_GOAL_LIMIT) {
-      setShowPremiumPanel(true);
+
       setToastMessage(`Free plan allows ${FREE_SAVINGS_GOAL_LIMIT} savings goal. Upgrade to Premium for unlimited.`);
       return;
     }
@@ -1193,7 +1207,7 @@ const monthlyIncome = useMemo(() => incomes.reduce((sum, i) => sum + i.amount, 0
     }
     const existingLimit = categoryLimits.find((cl) => cl.category.toLowerCase() === cat.toLowerCase());
     if (!entitlement.premiumActive && !existingLimit && categoryLimits.length >= FREE_CATEGORY_LIMIT_COUNT) {
-      setShowPremiumPanel(true);
+      
       setToastMessage(`Free plan allows ${FREE_CATEGORY_LIMIT_COUNT} spending limit. Upgrade to Premium for unlimited.`);
       return;
     }
@@ -1260,7 +1274,7 @@ const monthlyIncome = useMemo(() => incomes.reduce((sum, i) => sum + i.amount, 0
       return;
     }
     if (!entitlement.premiumActive && accounts.length >= FREE_ACCOUNT_LIMIT) {
-      setShowPremiumPanel(true);
+      
       setToastMessage(`Free plan allows ${FREE_ACCOUNT_LIMIT} accounts. Upgrade to Premium for unlimited.`);
       return;
     }
@@ -1549,14 +1563,14 @@ const incomeCategoryTotals = useMemo(() => {
     );
     const isNewCategory = !existingCategories.has(cleanedCategory.toLowerCase());
 
-    if (!entitlement.premiumActive && isNewCategory && existingCategories.size >= FREE_CATEGORY_LIMIT) {
-      setShowPremiumPanel(true);
+   if (isNewCategory && existingCategories.size >= maxCategories) {
+      
       setToastMessage(`Free plan supports up to ${FREE_CATEGORY_LIMIT} categories. Upgrade to Premium for unlimited categories.`);
       return;
     }
 
-    if (!entitlement.premiumActive && !editingItemId && items.length >= FREE_ITEM_LIMIT) {
-      setShowPremiumPanel(true);
+    if (!editingItemId && items.length >= maxItems) {
+      
       setToastMessage(`Free plan limit reached (${FREE_ITEM_LIMIT} items). Upgrade to Premium for unlimited items.`);
       return;
     }
@@ -2078,7 +2092,7 @@ const incomeCategoryTotals = useMemo(() => {
       setCurrentUser(null);
       setLocked(false);
       setPinInput("");
-      setShowPremiumPanel(false);
+      
 
       const targetEmail = forgotPasswordEmail.trim();
 
@@ -2364,9 +2378,51 @@ const incomeCategoryTotals = useMemo(() => {
     setCurrentUser(null);
     setLocked(false);
     setPinInput("");
-    setShowPremiumPanel(false);
     setToastMessage("Logged out successfully.");
   };
+
+  const handleActivateLicense = async () => {
+  if (!licenseCode.trim()) {
+    setToastMessage("Enter your license code.");
+    return;
+  }
+
+  if (!BILLING_BACKEND_URL) {
+    setToastMessage("Billing API is not configured.");
+    return;
+  }
+
+  if (!currentUser?.appUserId) {
+    setToastMessage("Please login first.");
+    return;
+  }
+
+  setLicenseSubmitting(true);
+  try {
+    const response = await fetch(`${BILLING_BACKEND_URL}/api/license/activate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        appUserId: currentUser.appUserId,
+        licenseCode: licenseCode.trim(),
+      }),
+    });
+
+    const data = (await response.json()) as { ok?: boolean; message?: string };
+
+    if (!response.ok || !data.ok) {
+      throw new Error(data.message ?? "License activation failed.");
+    }
+
+    setLicenseCode("");
+    setToastMessage("License activated successfully.");
+    void refreshEntitlement();
+  } catch (error) {
+    setToastMessage(error instanceof Error ? error.message : "License activation failed.");
+  } finally {
+    setLicenseSubmitting(false);
+  }
+};
 
 const smartTips = useMemo(() => {
     const tips: { icon: string; title: string; detail: string; type: "success" | "warning" | "danger" | "info" }[] = [];
@@ -2912,7 +2968,8 @@ const smartTips = useMemo(() => {
             <p className="text-sm font-semibold text-red-200">Premium subscription expired</p>
             <p className="mt-1 text-sm text-slate-300">Your premium access has expired. Renew to restore features.</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950">Re-upgrade now</button>
+            {canShowExternalUpgrade && (
+              <button onClick={() => setActiveTab("settings")} className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950">Go to Settings to activate license</button>)}
             </div>
           </section>
         )}
@@ -3345,7 +3402,26 @@ const smartTips = useMemo(() => {
                   <p className="text-3xl">📋</p>
                   <p className="mt-2 text-sm font-semibold text-slate-300">Payment History</p>
                   <p className="mt-1 text-xs text-slate-400">Track all your past payments</p>
-                  <button onClick={() => setShowPremiumPanel(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+
+                  {!canUsePremiumFeatures ? (
+  canShowExternalUpgrade ? (
+    <button
+      onClick={() => setActiveTab("settings")}
+      className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950"
+    >
+      Go to Settings to activate license
+    </button>
+  ) : (
+    <a
+      href="https://app4clients.com/"
+      target="_blank"
+      rel="noreferrer"
+      className="mt-3 inline-block rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800"
+    >
+      Visiter app4clients.com
+    </a>
+  )
+) : null}
                 </div>
               ) : items.length === 0 ? (
 
@@ -3473,7 +3549,26 @@ const smartTips = useMemo(() => {
                     <p className="text-3xl">📉</p>
                     <p className="mt-2 text-sm font-semibold text-slate-300">6-Month Spending Trend</p>
                     <p className="mt-1 text-xs text-slate-400">See how your spending changes over time</p>
-                    <button onClick={() => setShowPremiumPanel(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+
+                    {!canUsePremiumFeatures ? (
+  canShowExternalUpgrade ? (
+    <button
+      onClick={() => setActiveTab("settings")}
+      className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950"
+    >
+      Go to Settings to activate license
+    </button>
+  ) : (
+    <a
+      href="https://app4clients.com/"
+      target="_blank"
+      rel="noreferrer"
+      className="mt-3 inline-block rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800"
+    >
+      Visiter app4clients.com
+    </a>
+  )
+) : null}
                   </div>
                 ) : last6MonthsTotals.every((m) => m.total === 0) ? (
                   <p className="text-sm text-slate-400">Trend data will appear after a few months.</p>
@@ -3618,7 +3713,25 @@ const smartTips = useMemo(() => {
                   <p className="text-3xl">⚠️</p>
                   <p className="mt-2 text-sm font-semibold text-slate-300">Late Fee Calculator</p>
                   <p className="mt-1 text-xs text-slate-400">Track potential late fees for overdue bills</p>
-                  <button onClick={() => setShowPremiumPanel(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                  {!canUsePremiumFeatures ? (
+  canShowExternalUpgrade ? (
+    <button
+      onClick={() => setActiveTab("settings")}
+      className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950"
+    >
+      Go to Settings to activate license
+    </button>
+  ) : (
+    <a
+      href="https://app4clients.com/"
+      target="_blank"
+      rel="noreferrer"
+      className="mt-3 inline-block rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800"
+    >
+      Visiter app4clients.com
+    </a>
+  )
+) : null}
                 </div>
               ) : lateFeeRules.length === 0 ? (
 
@@ -3859,7 +3972,25 @@ const smartTips = useMemo(() => {
                   <p className="text-3xl">📈</p>
                   <p className="mt-2 text-sm font-semibold text-slate-300">Savings Projections</p>
                   <p className="mt-1 text-xs text-slate-400">See how much to save per month to reach your goals</p>
-                  <button onClick={() => setShowPremiumPanel(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                  {!canUsePremiumFeatures ? (
+  canShowExternalUpgrade ? (
+    <button
+      onClick={() => setActiveTab("settings")}
+      className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950"
+    >
+      Go to Settings to activate license
+    </button>
+  ) : (
+    <a
+      href="https://app4clients.com/"
+      target="_blank"
+      rel="noreferrer"
+      className="mt-3 inline-block rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800"
+    >
+      Visiter app4clients.com
+    </a>
+  )
+) : null}
                 </div>
               ) : savingsGoals.length === 0 ? (
 
@@ -3962,6 +4093,7 @@ const smartTips = useMemo(() => {
         {/* ===== TAB: SETTINGS ===== */}
         {activeTab === "settings" && (
           <>
+<<<<<<< HEAD
             {showPremiumPanel && (
   <section className="mb-6 rounded-xl border border-amber-500/40 bg-slate-900 p-4">
     <h2 className="text-lg font-semibold text-amber-300">💎 Upgrade to Premium</h2>
@@ -4058,6 +4190,8 @@ const smartTips = useMemo(() => {
               </div>
             </section>
 
+=======
+>>>>>>> 57fc7d4 (licence)
             {/* Preferences */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
               <h2 className="mb-3 text-lg font-semibold">Preferences</h2>
@@ -4077,6 +4211,36 @@ const smartTips = useMemo(() => {
               </div>
             </section>
 
+
+            <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+  <h2 className="mb-3 text-lg font-semibold">License Premium</h2>
+
+  <p className="text-sm text-slate-300">
+    Status: {entitlement.loading ? "Checking..." : entitlement.premiumActive ? "Premium active" : "Free plan"}
+    {entitlement.expiresAt ? ` · Expires ${new Date(entitlement.expiresAt).toLocaleDateString()}` : ""}
+  </p>
+
+  <div className="mt-3 flex flex-wrap gap-2">
+    <input
+      value={licenseCode}
+      onChange={(e) => setLicenseCode(e.target.value)}
+      placeholder="Enter license code"
+      className="min-w-[240px] flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+    />
+    <button
+      onClick={() => void handleActivateLicense()}
+      disabled={licenseSubmitting}
+      className="rounded-lg border border-cyan-500 px-3 py-2 text-cyan-300 disabled:opacity-60"
+    >
+      {licenseSubmitting ? "Activating..." : "Activate License"}
+    </button>
+  </div>
+
+  <p className="mt-2 text-xs text-slate-400">
+    Buy a license on Gumroad, then paste your code here.
+  </p>
+</section>
+
             {/* Security & Backup */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
               <h2 className="mb-3 text-lg font-semibold">Security & Backup</h2>
@@ -4094,17 +4258,41 @@ const smartTips = useMemo(() => {
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button onClick={exportBackup} className="rounded-lg border border-emerald-600 px-3 py-2 text-emerald-300">Export backup</button>
                     <label className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200">Restore backup<input type="file" accept="application/json" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) void restoreBackup(file); }} /></label>
-                                        {entitlement.premiumActive ? (
-                      <>
-                        <button onClick={exportCsv} className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200 hover:bg-slate-800 transition">Export CSV</button>
-                        <button onClick={exportPdf} className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200 hover:bg-slate-800 transition">Export PDF</button>
-                      </>
-                    ) : (
-                      <>
-                        <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg border border-amber-500/50 px-3 py-2 text-amber-300 hover:bg-amber-500/10 transition">🔒 Export CSV</button>
-                        <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg border border-amber-500/50 px-3 py-2 text-amber-300 hover:bg-amber-500/10 transition">🔒 Export PDF</button>
-                      </>
-                    )}
+                                        {IS_PLAY ? (
+  <p className="text-xs text-slate-400">
+    Export avance non disponible dans cette version.
+  </p>
+) : entitlement.premiumActive ? (
+  <>
+    <button
+      onClick={exportCsv}
+      className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200 hover:bg-slate-800 transition"
+    >
+      Export CSV
+    </button>
+    <button
+      onClick={exportPdf}
+      className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200 hover:bg-slate-800 transition"
+    >
+      Export PDF
+    </button>
+  </>
+) : (
+  <>
+    <button
+      onClick={() => setActiveTab("settings")}
+      className="rounded-lg border border-amber-500/50 px-3 py-2 text-amber-300 hover:bg-amber-500/10 transition"
+    >
+      Export CSV
+    </button>
+    <button
+      onClick={() => setActiveTab("settings")}
+      className="rounded-lg border border-amber-500/50 px-3 py-2 text-amber-300 hover:bg-amber-500/10 transition"
+    >
+      Export PDF
+    </button>
+  </>
+)}
                   </div>
                 </div>
                 <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
@@ -4135,6 +4323,7 @@ const smartTips = useMemo(() => {
           </div>
         )}
 
+<<<<<<< HEAD
         {showLegal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
             <div className="w-full max-w-2xl rounded-xl border border-slate-700 bg-slate-900 p-4">
@@ -4156,6 +4345,8 @@ const smartTips = useMemo(() => {
             </div>
           </div>
         )}
+=======
+>>>>>>> 57fc7d4 (licence)
       </div>
 
       {/* ===== BOTTOM NAVIGATION BAR ===== */}
