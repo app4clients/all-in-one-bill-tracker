@@ -17,8 +17,13 @@ android {
         applicationId "com.app4clients.allinonebilltracker"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
+<<<<<<< HEAD
         versionCode 5
         versionName "2.0"
+=======
+        versionCode 4
+        versionName "1.2"
+>>>>>>> 57fc7d4 (licence)
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'

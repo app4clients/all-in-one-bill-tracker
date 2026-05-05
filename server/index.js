@@ -1,3 +1,4 @@
+import licenseRoutes from "./routes/license.routes.js";
 import { writeFileSync } from "fs";
 import "dotenv/config";
 import cors from "cors";
@@ -1379,9 +1380,15 @@ app.get("/api/billing/entitlement/:appUserId", async (req, res) => {
   }
 });
 
+
+app.use("/api/license", licenseRoutes);
+
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, () => {
   // Keep startup log minimal for production logs.
   // eslint-disable-next-line no-console
   console.log(`Billing backend listening on ${port}`);
 });
+
+
+
