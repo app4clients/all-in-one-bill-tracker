@@ -301,6 +301,12 @@ function readLS<T>(key: string, fallback: T): T {
   }
 }
 
+function getSnapshotKey(userScopedKeyFn: (key: string) => string, date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${userScopedKeyFn("snapshot")}-${year}-${month}`;
+}
+
 function getNextDueDate(dueDay: number, now = new Date()) {
   const year = now.getFullYear();
   const month = now.getMonth();
@@ -551,8 +557,8 @@ const [accountForm, setAccountForm] = useState({ name: "", type: "bank" as Accou
   const [lateFeeRules, setLateFeeRules] = useState<LateFeeRule[]>([]);
   const [lateFeeForm, setLateFeeForm] = useState({ name: "", feePerDay: 0, graceDays: 0 });
   const [entitlement, setEntitlement] = useState<EntitlementState>({
-    loading: true,
-    premiumActive: false,
+    loading: false,
+premiumActive: true,
     productId: null,
     expiresAt: null,
     error: "",
@@ -821,7 +827,7 @@ const refreshEntitlement = useCallback(async () => {
   if (!BILLING_BACKEND_URL) {
     setEntitlement({
       loading: false,
-      premiumActive: false,
+      premiumActive: true,
       productId: null,
       expiresAt: null,
       error: "Set VITE_BILLING_API_BASE_URL to enable server entitlement checks.",
@@ -847,7 +853,7 @@ const refreshEntitlement = useCallback(async () => {
 
     setEntitlement({
       loading: false,
-      premiumActive: Boolean(payload.ok && payload.premiumActive),
+     premiumActive: true,
       productId: payload.productId ?? null,
       expiresAt: payload.expiresAt ?? null,
       error: "",
@@ -855,7 +861,7 @@ const refreshEntitlement = useCallback(async () => {
   } catch {
     setEntitlement({
       loading: false,
-      premiumActive: false,
+      premiumActive: true,
       productId: null,
       expiresAt: null,
       error: "Unable to refresh premium state from server.",
@@ -940,14 +946,6 @@ useEffect(() => {
     }
     localStorage.setItem(userScopedKey(STORAGE_KEYS.exchangeRatesUpdatedAt), JSON.stringify(fxUpdatedAt));
   }, [fxUpdatedAt, appUserId]);
-
-  useEffect(() => {
-    void refreshExchangeRates();
-    const interval = window.setInterval(() => {
-      void refreshExchangeRates();
-    }, 6 * 60 * 60 * 1000);
-    return () => window.clearInterval(interval);
-  }, [refreshExchangeRates]);
 
   useEffect(() => {
     if (!toastMessage) {
@@ -1151,7 +1149,7 @@ const monthlyIncome = useMemo(() => incomes.reduce((sum, i) => sum + i.amount, 0
       setToastMessage("Please fill goal name and target amount.");
       return;
     }
-    if (!entitlement.premiumActive && savingsGoals.length >= FREE_SAVINGS_GOAL_LIMIT) {
+    if (!canUsePremiumFeatures && savingsGoals.length >= FREE_SAVINGS_GOAL_LIMIT) {
       setShowPremiumPanel(true);
       setToastMessage(`Free plan allows ${FREE_SAVINGS_GOAL_LIMIT} savings goal. Upgrade to Premium for unlimited.`);
       return;
@@ -1192,7 +1190,7 @@ const monthlyIncome = useMemo(() => incomes.reduce((sum, i) => sum + i.amount, 0
       return;
     }
     const existingLimit = categoryLimits.find((cl) => cl.category.toLowerCase() === cat.toLowerCase());
-    if (!entitlement.premiumActive && !existingLimit && categoryLimits.length >= FREE_CATEGORY_LIMIT_COUNT) {
+    if (!canUsePremiumFeatures && !existingLimit && categoryLimits.length >= FREE_CATEGORY_LIMIT_COUNT) {
       setShowPremiumPanel(true);
       setToastMessage(`Free plan allows ${FREE_CATEGORY_LIMIT_COUNT} spending limit. Upgrade to Premium for unlimited.`);
       return;
@@ -1259,7 +1257,7 @@ const monthlyIncome = useMemo(() => incomes.reduce((sum, i) => sum + i.amount, 0
       setToastMessage("Please enter an account name.");
       return;
     }
-    if (!entitlement.premiumActive && accounts.length >= FREE_ACCOUNT_LIMIT) {
+    if (!canUsePremiumFeatures && accounts.length >= FREE_ACCOUNT_LIMIT) {
       setShowPremiumPanel(true);
       setToastMessage(`Free plan allows ${FREE_ACCOUNT_LIMIT} accounts. Upgrade to Premium for unlimited.`);
       return;
@@ -1314,8 +1312,8 @@ const incomeCategoryTotals = useMemo(() => {
       });
     }
     return months.map((m) => {
-      const snapshotKey = `${userScopedKey("snapshot")}-${m.month}`;
-      const total = readLS<number>(snapshotKey, 0);
+      const snapshotKey = getSnapshotKey(userScopedKey, new Date(m.year, m.month, 1));
+const total = readLS<number>(snapshotKey, 0);
       return { ...m, total };
     });
   }, [appUserId, items]);
@@ -1334,7 +1332,12 @@ const incomeCategoryTotals = useMemo(() => {
       messages.push(`${renewTomorrowCount} subscription${renewTomorrowCount > 1 ? "s" : ""} renew tomorrow.`);
     }
 
-    const previousMonthSnapshot = readLS<number>(`${userScopedKey("snapshot")}-${new Date().getMonth() - 1}`, monthlyTotal);
+    const previousMonthDate = new Date();
+previousMonthDate.setMonth(previousMonthDate.getMonth() - 1);
+const previousMonthSnapshot = readLS<number>(
+  getSnapshotKey(userScopedKey, previousMonthDate),
+  monthlyTotal,
+);
     if (previousMonthSnapshot > 0 && monthlyTotal > previousMonthSnapshot * 1.4) {
       messages.push("You are spending more than 40% vs last month.");
     }
@@ -1352,8 +1355,8 @@ const incomeCategoryTotals = useMemo(() => {
     if (!appUserId) {
       return;
     }
-    const snapshotKey = `${userScopedKey("snapshot")}-${new Date().getMonth()}`;
-    localStorage.setItem(snapshotKey, JSON.stringify(monthlyTotal));
+    const snapshotKey = getSnapshotKey(userScopedKey, new Date());
+localStorage.setItem(snapshotKey, JSON.stringify(monthlyTotal));
   }, [monthlyTotal, appUserId]);
 
   useEffect(() => {
@@ -1466,14 +1469,14 @@ const incomeCategoryTotals = useMemo(() => {
     });
   }, [savingsRate, budgetProgress, withDue, items, monthlyIncome, budget, savingsGoals, categoryLimits, categoryLimitStatus, totalLateFees, totalAccountBalance, monthlyTotal]);
 
-  const canUsePremiumFeatures = entitlement.premiumActive;
+  const canUsePremiumFeatures = true;
   const freeItemsLeft = Math.max(0, FREE_ITEM_LIMIT - items.length);
-  const subscriptionExpired = Boolean(entitlement.expiresAt) && !entitlement.premiumActive && new Date(entitlement.expiresAt as string).getTime() <= Date.now();
+  const subscriptionExpired = Boolean(entitlement.expiresAt) && !canUsePremiumFeatures && new Date(entitlement.expiresAt as string).getTime() <= Date.now();
 
   useEffect(() => {
-    if (!dueDaySoundEnabled) {
-      return;
-    }
+  if (!dueDaySoundEnabled) {
+    return;
+  }
 
     const sentSoundMap = readLS<Record<string, boolean>>(userScopedKey(STORAGE_KEYS.sentDueDaySoundMap), {});
     let changed = false;
@@ -1549,13 +1552,13 @@ const incomeCategoryTotals = useMemo(() => {
     );
     const isNewCategory = !existingCategories.has(cleanedCategory.toLowerCase());
 
-    if (!entitlement.premiumActive && isNewCategory && existingCategories.size >= FREE_CATEGORY_LIMIT) {
+    if (!canUsePremiumFeatures && isNewCategory && existingCategories.size >= FREE_CATEGORY_LIMIT) {
       setShowPremiumPanel(true);
       setToastMessage(`Free plan supports up to ${FREE_CATEGORY_LIMIT} categories. Upgrade to Premium for unlimited categories.`);
       return;
     }
 
-    if (!entitlement.premiumActive && !editingItemId && items.length >= FREE_ITEM_LIMIT) {
+    if (!canUsePremiumFeatures && !editingItemId && items.length >= FREE_ITEM_LIMIT) {
       setShowPremiumPanel(true);
       setToastMessage(`Free plan limit reached (${FREE_ITEM_LIMIT} items). Upgrade to Premium for unlimited items.`);
       return;
@@ -1613,27 +1616,41 @@ const incomeCategoryTotals = useMemo(() => {
   };
 
   const markPaid = (id: string) => {
-    const target = items.find((item) => item.id === id);
-    setItems((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              lastPaidAt: new Date().toISOString(),
-            }
-          : item,
-      ),
+  const paidAt = new Date().toISOString();
+  const target = items.find((item) => item.id === id);
+
+  setItems((prev) =>
+    prev.map((item) =>
+      item.id === id
+        ? {
+            ...item,
+            lastPaidAt: paidAt,
+          }
+        : item,
+    ),
+  );
+
+  if (target) {
+    setPaymentHistory((prev) =>
+      [
+        {
+          id: crypto.randomUUID(),
+          itemId: target.id,
+          itemName: target.name,
+          paidAt,
+          amount: target.amount,
+        },
+        ...prev,
+      ].slice(0, 200),
     );
 
-
-    if (target) {
-      pushNotificationCenter({
-        title: "Payment marked as paid",
-        detail: `${target.name} was marked as paid for this month.`,
-        type: "reminder",
-      });
-    }
-  };
+    pushNotificationCenter({
+      title: "Payment marked as paid",
+      detail: `${target.name} was marked as paid for this month.`,
+      type: "reminder",
+    });
+  }
+};
 
   const startEditItem = (id: string) => {
     const selectedItem = items.find((item) => item.id === id);
@@ -1763,6 +1780,7 @@ const incomeCategoryTotals = useMemo(() => {
   };
 
   const restoreBackup = async (file: File) => {
+  try {
     const text = await file.text();
     const data = JSON.parse(text) as Partial<{
       version: number;
@@ -1801,7 +1819,10 @@ const incomeCategoryTotals = useMemo(() => {
     if (data.notificationCenter) { setNotificationCenter(data.notificationCenter); restoredCount++; }
 
     setToastMessage(`Backup restored! (${restoredCount} sections recovered)`);
-  };
+  } catch {
+    setToastMessage("Invalid backup file. Please select a valid JSON backup.");
+  }
+};
 
   const setPinCode = async () => {
     if (!/^\d{4,8}$/.test(newPin)) {
@@ -2020,8 +2041,7 @@ const incomeCategoryTotals = useMemo(() => {
     }
   };
 
-  const handleForgotPasswordReset = async (event: FormEvent) => {
-    event.preventDefault();
+  const handleForgotPasswordReset = async () => {
     setAuthError("");
     setForgotPasswordInfo("");
 
@@ -2216,11 +2236,10 @@ const incomeCategoryTotals = useMemo(() => {
 
   const exportCsv = () => {
     const headers = [
-      "Name", "Type", "Category",
-      `Amount_${currency}`, "DueDay", "ReminderDays",
-      "PaidThisMonth", "LastPaidAt",
-      "BalanceLeft", "SavingsRate",
-    ];
+  "Name", "Type", "Category",
+  `Amount_${currency}`, "DueDay", "ReminderDays",
+  "PaidThisMonth", "LastPaidAt",
+];
 
     const rows = items.map((item) => [
       item.name,
@@ -2261,7 +2280,7 @@ const incomeCategoryTotals = useMemo(() => {
     setToastMessage("CSV export with summary ready.");
   };
 
-  const exportPdf = () => {
+  const exportHtmlReport = () => {
     const rows = items
       .map(
         (item) =>
@@ -2652,7 +2671,7 @@ const smartTips = useMemo(() => {
                         {forgotPasswordSubmitting ? "Requesting..." : "Request reset code"}
                       </button>
                     ) : (
-                      <form className="space-y-2" onSubmit={handleForgotPasswordReset}>
+                      <div className="space-y-2">
                         <div className="relative">
                           <input
                             type={showForgotPasswordToken ? "text" : "password"}
@@ -2690,12 +2709,15 @@ const smartTips = useMemo(() => {
                           </button>
                         </div>
                         <button
-                          type="submit"
-                          disabled={forgotPasswordSubmitting}
-                          className="w-full rounded-lg border border-emerald-500 px-3 py-2 text-sm text-emerald-300 disabled:opacity-60"
-                        >
-                          {forgotPasswordSubmitting ? "Updating..." : "Update password"}
-                        </button>
+  type="button"
+  onClick={() => {
+    void handleForgotPasswordReset();
+  }}
+  disabled={forgotPasswordSubmitting}
+  className="w-full rounded-lg border border-emerald-500 px-3 py-2 text-sm text-emerald-300 disabled:opacity-60"
+>
+  {forgotPasswordSubmitting ? "Updating..." : "Update password"}
+</button>
                         <button
                           type="button"
                           onClick={() => {
@@ -2718,7 +2740,7 @@ const smartTips = useMemo(() => {
                         >
                           Back to request step
                         </button>
-                      </form>
+                      </div>
                     )}
 
                     {forgotPasswordInfo && <p className="text-xs text-emerald-300">{forgotPasswordInfo}</p>}
@@ -2892,7 +2914,7 @@ const smartTips = useMemo(() => {
                 🔒
               </button>
             )}
-            {entitlement.premiumActive && (
+            {canUsePremiumFeatures && (
   <span className="rounded-lg bg-amber-400/20 border border-amber-400/50 px-2 py-1 text-xs font-bold text-amber-300">💎 Premium</span>
 )}
 <button onClick={handleLogout} className="rounded-lg border border-red-500 px-3 py-2 text-sm text-red-300">
@@ -2906,6 +2928,85 @@ const smartTips = useMemo(() => {
           {fxUpdatedAt ? ` · updated ${new Date(fxUpdatedAt).toLocaleString()}` : ""}
           <button type="button" onClick={() => void refreshExchangeRates()} className="ml-2 text-cyan-300">Refresh</button>
         </p>
+
+{showPremiumPanel && (
+  <section className="mb-6 rounded-xl border border-amber-500/40 bg-slate-900 p-4">
+    <h2 className="text-lg font-semibold text-amber-300">💎 Upgrade to Premium</h2>
+    <p className="mt-2 text-sm text-slate-300">
+      Unlock unlimited bills, analytics, savings goals, and more!
+    </p>
+
+    {/* Payment methods info */}
+    <div className="mt-3 rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3">
+      <p className="text-xs font-semibold text-cyan-300 mb-2">💳 Accepted Payment Methods:</p>
+      <div className="flex flex-wrap gap-2">
+        <span className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300">💳 Credit Card</span>
+        <span className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300">🅿️ PayPal</span>
+        <span className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300">🍎 Apple Pay</span>
+        <span className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300">🌍 Debit Card</span>
+      </div>
+      <p className="mt-2 text-[11px] text-slate-500">All payments are processed securely via Gumroad.</p>
+    </div>
+
+    {/* Plans */}
+    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="rounded-lg border border-slate-700 bg-slate-950 p-4">
+        <p className="text-sm font-medium">Monthly</p>
+        <p className="text-2xl font-bold text-cyan-300">$2.99<small className="text-xs text-slate-400">/month</small></p>
+        <ul className="mt-2 space-y-1 text-xs text-slate-400">
+          <li>✓ Unlimited bills</li>
+          <li>✓ Full analytics</li>
+          <li>✓ Savings projections</li>
+          <li>✓ 22+ currencies</li>
+        </ul>
+        <button
+          type="button"
+          onClick={() => window.open("https://app4clients.gumroad.com/l/vhabmx", "_blank")}
+          className="mt-3 w-full rounded-lg bg-amber-400 px-3 py-2.5 text-sm font-bold text-slate-950 hover:bg-amber-300 active:scale-95 transition-all"
+        >
+          Subscribe Now →
+        </button>
+      </div>
+      <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-4">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium">Yearly</p>
+          <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300">BEST VALUE</span>
+        </div>
+        <p className="text-2xl font-bold text-cyan-300">$19.99<small className="text-xs text-slate-400">/year</small></p>
+        <p className="text-xs text-emerald-300 font-medium">Save 44% vs monthly!</p>
+        <ul className="mt-2 space-y-1 text-xs text-slate-400">
+          <li>✓ Everything in Monthly</li>
+          <li>✓ Pay once per year</li>
+          <li>✓ Priority support</li>
+          <li>✓ All future features</li>
+        </ul>
+        <button
+          type="button"
+          onClick={() => window.open("https://app4clients.gumroad.com/l/vhabmx", "_blank")}
+          className="mt-3 w-full rounded-lg bg-amber-400 px-3 py-2.5 text-sm font-bold text-slate-950 hover:bg-amber-300 active:scale-95 transition-all"
+        >
+          Subscribe Now →
+        </button>
+      </div>
+    </div>
+
+    {/* How it works */}
+    <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
+      <p className="text-xs font-semibold text-slate-300 mb-2">📱 How it works:</p>
+      <div className="space-y-1.5 text-xs text-slate-400">
+        <p>1️⃣ Tap "Subscribe Now" → opens payment page</p>
+        <p>2️⃣ Pay with PayPal, Credit Card, or Apple Pay</p>
+        <p>3️⃣ Return to this app — premium activates automatically!</p>
+      </div>
+      <p className="mt-2 text-[11px] text-amber-300">⚠️ Use the same email address you signed up with in this app.</p>
+    </div>
+
+    <div className="mt-3 flex flex-wrap gap-2">
+      <button onClick={() => void refreshEntitlement()} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300">🔄 Check Premium Status</button>
+      <button onClick={() => setShowPremiumPanel(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Close</button>
+    </div>
+  </section>
+)}
 
         {subscriptionExpired && (
           <section className="mb-4 rounded-xl border border-red-500/50 bg-red-950/30 p-4">
@@ -3340,7 +3441,7 @@ const smartTips = useMemo(() => {
   </InfoModal>
 </h2>
 
-              {!entitlement.premiumActive ? (
+              {!canUsePremiumFeatures ? (
                 <div className="py-6 text-center">
                   <p className="text-3xl">📋</p>
                   <p className="mt-2 text-sm font-semibold text-slate-300">Payment History</p>
@@ -3468,7 +3569,7 @@ const smartTips = useMemo(() => {
     <p className="mt-2 text-amber-300">💡 Trends visible after 2-3 months of use!</p>
   </InfoModal>
 </h2>
-                {!entitlement.premiumActive ? (
+                {!canUsePremiumFeatures ? (
                   <div className="py-6 text-center">
                     <p className="text-3xl">📉</p>
                     <p className="mt-2 text-sm font-semibold text-slate-300">6-Month Spending Trend</p>
@@ -3613,7 +3714,7 @@ const smartTips = useMemo(() => {
     <p className="mt-2 text-amber-300">💡 Fee = (overdue days − grace days) × fee/day</p>
   </InfoModal>
 </h2>
-               {!entitlement.premiumActive ? (
+               {!canUsePremiumFeatures ? (
                 <div className="py-6 text-center">
                   <p className="text-3xl">⚠️</p>
                   <p className="mt-2 text-sm font-semibold text-slate-300">Late Fee Calculator</p>
@@ -3854,7 +3955,7 @@ const smartTips = useMemo(() => {
   </InfoModal>
 </h2>
 
-               {!entitlement.premiumActive ? (
+               {!canUsePremiumFeatures ? (
                 <div className="py-6 text-center">
                   <p className="text-3xl">📈</p>
                   <p className="mt-2 text-sm font-semibold text-slate-300">Savings Projections</p>
@@ -3962,84 +4063,6 @@ const smartTips = useMemo(() => {
         {/* ===== TAB: SETTINGS ===== */}
         {activeTab === "settings" && (
           <>
-            {showPremiumPanel && (
-  <section className="mb-6 rounded-xl border border-amber-500/40 bg-slate-900 p-4">
-    <h2 className="text-lg font-semibold text-amber-300">💎 Upgrade to Premium</h2>
-    <p className="mt-2 text-sm text-slate-300">
-      Unlock unlimited bills, analytics, savings goals, and more!
-    </p>
-
-    {/* Payment methods info */}
-    <div className="mt-3 rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3">
-      <p className="text-xs font-semibold text-cyan-300 mb-2">💳 Accepted Payment Methods:</p>
-      <div className="flex flex-wrap gap-2">
-        <span className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300">💳 Credit Card</span>
-        <span className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300">🅿️ PayPal</span>
-        <span className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300">🍎 Apple Pay</span>
-        <span className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-300">🌍 Debit Card</span>
-      </div>
-      <p className="mt-2 text-[11px] text-slate-500">All payments are processed securely via Gumroad.</p>
-    </div>
-
-    {/* Plans */}
-    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-      <div className="rounded-lg border border-slate-700 bg-slate-950 p-4">
-        <p className="text-sm font-medium">Monthly</p>
-        <p className="text-2xl font-bold text-cyan-300">$2.99<small className="text-xs text-slate-400">/month</small></p>
-        <ul className="mt-2 space-y-1 text-xs text-slate-400">
-          <li>✓ Unlimited bills</li>
-          <li>✓ Full analytics</li>
-          <li>✓ Savings projections</li>
-          <li>✓ 22+ currencies</li>
-        </ul>
-        <button
-          type="button"
-          onClick={() => window.open("https://appclient2.gumroad.com/l/vhabmx", "_blank")}
-          className="mt-3 w-full rounded-lg bg-amber-400 px-3 py-2.5 text-sm font-bold text-slate-950 hover:bg-amber-300 active:scale-95 transition-all"
-        >
-          Subscribe Now →
-        </button>
-      </div>
-      <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-4">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-medium">Yearly</p>
-          <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300">BEST VALUE</span>
-        </div>
-        <p className="text-2xl font-bold text-cyan-300">$19.99<small className="text-xs text-slate-400">/year</small></p>
-        <p className="text-xs text-emerald-300 font-medium">Save 44% vs monthly!</p>
-        <ul className="mt-2 space-y-1 text-xs text-slate-400">
-          <li>✓ Everything in Monthly</li>
-          <li>✓ Pay once per year</li>
-          <li>✓ Priority support</li>
-          <li>✓ All future features</li>
-        </ul>
-        <button
-          type="button"
-          onClick={() => window.open("https://appclient2.gumroad.com/l/vhabmx", "_blank")}
-          className="mt-3 w-full rounded-lg bg-amber-400 px-3 py-2.5 text-sm font-bold text-slate-950 hover:bg-amber-300 active:scale-95 transition-all"
-        >
-          Subscribe Now →
-        </button>
-      </div>
-    </div>
-
-    {/* How it works */}
-    <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
-      <p className="text-xs font-semibold text-slate-300 mb-2">📱 How it works:</p>
-      <div className="space-y-1.5 text-xs text-slate-400">
-        <p>1️⃣ Tap "Subscribe Now" → opens payment page</p>
-        <p>2️⃣ Pay with PayPal, Credit Card, or Apple Pay</p>
-        <p>3️⃣ Return to this app — premium activates automatically!</p>
-      </div>
-      <p className="mt-2 text-[11px] text-amber-300">⚠️ Use the same email address you signed up with in this app.</p>
-    </div>
-
-    <div className="mt-3 flex flex-wrap gap-2">
-      <button onClick={() => void refreshEntitlement()} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300">🔄 Check Premium Status</button>
-      <button onClick={() => setShowPremiumPanel(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Close</button>
-    </div>
-  </section>
-)}
 
             {/* Subscription Status */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
@@ -4094,15 +4117,15 @@ const smartTips = useMemo(() => {
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button onClick={exportBackup} className="rounded-lg border border-emerald-600 px-3 py-2 text-emerald-300">Export backup</button>
                     <label className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200">Restore backup<input type="file" accept="application/json" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) void restoreBackup(file); }} /></label>
-                                        {entitlement.premiumActive ? (
+                                        {canUsePremiumFeatures ? (
                       <>
                         <button onClick={exportCsv} className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200 hover:bg-slate-800 transition">Export CSV</button>
-                        <button onClick={exportPdf} className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200 hover:bg-slate-800 transition">Export PDF</button>
+                        <button onClick={exportHtmlReport} className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200 hover:bg-slate-800 transition">Export Report (HTML)</button>
                       </>
                     ) : (
                       <>
                         <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg border border-amber-500/50 px-3 py-2 text-amber-300 hover:bg-amber-500/10 transition">🔒 Export CSV</button>
-                        <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg border border-amber-500/50 px-3 py-2 text-amber-300 hover:bg-amber-500/10 transition">🔒 Export PDF</button>
+                        <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg border border-amber-500/50 px-3 py-2 text-amber-300 hover:bg-amber-500/10 transition">🔒 Export Report (HTML)</button>
                       </>
                     )}
                   </div>
@@ -4146,7 +4169,7 @@ const smartTips = useMemo(() => {
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
-  onClick={() => window.open("https://appclient2.gumroad.com/l/vhabmx", "_blank")}
+  onClick={() => window.open("https://app4clients.gumroad.com/l/vhabmx", "_blank")}
   className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300"
 >
   Manage Subscription
