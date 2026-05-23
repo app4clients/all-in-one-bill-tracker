@@ -1,7 +1,17 @@
-﻿node_modules/
+# dépendances
+node_modules/
+# build
 dist/
+build/
+# env
 .env
-server/.env
-android/.gradle/
-android/local.properties
+.env.*.local
+# cache / IDE
+.DS_Store
+.idea/
+.vscode/
+# logs
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
 *.log

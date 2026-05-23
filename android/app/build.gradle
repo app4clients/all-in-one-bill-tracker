@@ -17,13 +17,8 @@ android {
         applicationId "com.app4clients.allinonebilltracker"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-<<<<<<< HEAD
-        versionCode 5
-        versionName "2.0"
-=======
-        versionCode 4
-        versionName "1.2"
->>>>>>> 57fc7d4 (licence)
+        versionCode 6
+        versionName "3.5"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
@@ -62,7 +57,7 @@ configurations.configureEach {
 }
 
 dependencies {
-    def kotlinVersion = rootProject.ext.has('kotlin_version') ? rootProject.ext.kotlin_version : '1.8.22'
+    def kotlinVersion = rootProject.ext.has('kotlin_version') ? rootProject.ext.kotlin_version : '1.9.25'
 
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation platform("org.jetbrains.kotlin:kotlin-bom:$kotlinVersion")

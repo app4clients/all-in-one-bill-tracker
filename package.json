@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+        "build": "vite build",
+    "build:playstore": "cp .env.playstore .env && vite build",
+    "build:full": "cp .env.full .env && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

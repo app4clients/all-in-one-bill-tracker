@@ -1,4 +1,4 @@
-import { useCallback, FormEvent, useEffect, useMemo, useState } from "react";
+import React, { useCallback, FormEvent, useEffect, useMemo, useState } from "react";
 
 type ItemType = "bill" | "subscription";
 type StatusFilter = "all" | "dueSoon" | "paid" | "unpaid";
@@ -22,6 +22,7 @@ type AuthUser = {
   phoneNumber: string;
   username: string;
   email: string;
+  country?: string;
   emailVerifiedAt?: string | null;
   tokenVersion?: number;
 };
@@ -30,8 +31,9 @@ type NotificationEntry = {
   id: string;
   title: string;
   detail: string;
-  type: "reminder" | "security" | "insight" | "system";
+  type: "reminder" | "security" | "insight" | "system" | "achievement";
   createdAt: string;
+  read?: boolean;
 };
 
 type PhoneCountryOption = {
@@ -89,6 +91,11 @@ type IncomeEntry = {
   createdAt: string;
 };
 
+type RecurrenceType = "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly";
+
+
+type Template = Omit<BillItem, "id" | "createdAt" | "lastPaidAt"> & { repeat?: RecurrenceType };
+
 type BillItem = {
   id: string;
   name: string;
@@ -97,12 +104,38 @@ type BillItem = {
   category: string;
   reminderDays: number;
   type: ItemType;
-  repeat: "monthly";
+  repeat: RecurrenceType;
+    note?: string;
+  priority: PriorityLevel;
   lastPaidAt?: string;
   createdAt: string;
 };
 
-type Template = Omit<BillItem, "id" | "createdAt" | "lastPaidAt">;
+type DailyExpense = {
+  id: string;
+  description: string;
+  amount: number;
+  category: string;
+  date: string;
+  createdAt: string;
+};
+
+type Achievement = {
+  id: string;
+  icon: string;
+  title: string;
+  description: string;
+  unlockedAt: string;
+};
+
+type PriorityLevel = "high" | "medium" | "low";
+
+type ReminderSettings = {
+  daysBefore: number;
+  onDueDay: boolean;
+  daysAfter: number;
+  soundEnabled: boolean;
+};
 
 const STORAGE_KEYS = {
   authToken: "bill-tracker-auth-token",
@@ -126,16 +159,20 @@ const STORAGE_KEYS = {
   theme: "bill-tracker-theme",
   accounts: "bill-tracker-accounts",
   paymentHistory: "bill-tracker-payment-history",
+    dailyExpenses: "bill-tracker-daily-expenses",
 };
 
-const FREE_ITEM_LIMIT = 8;
-const FREE_CATEGORY_LIMIT = 3;
-const FREE_ACCOUNT_LIMIT = 2;
-const FREE_SAVINGS_GOAL_LIMIT = 1;
-const FREE_CATEGORY_LIMIT_COUNT = 1;
+const BUILD_VARIANT = (import.meta.env.VITE_BUILD_VARIANT as string | undefined) ?? "full";
+const IS_PLAYSTORE = BUILD_VARIANT === "playstore";
+const FREE_ITEM_LIMIT = IS_PLAYSTORE ? 5 : 8;
+const FREE_CATEGORY_LIMIT = IS_PLAYSTORE ? 2 : 3;
+const FREE_ACCOUNT_LIMIT = IS_PLAYSTORE ? 1 : 2;
+const FREE_SAVINGS_GOAL_LIMIT = IS_PLAYSTORE ? 0 : 1;
+const FREE_CATEGORY_LIMIT_COUNT = IS_PLAYSTORE ? 0 : 1;
 const BILLING_BACKEND_URL = (import.meta.env.VITE_BILLING_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 const AUTH_API_BASE_URL = (import.meta.env.VITE_AUTH_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
-const WEBSITE_PAYMENT_URL = "https://app4clients.com/";
+const WEBSITE_PAYMENT_URL = IS_PLAYSTORE ? "https://app4clients.com/" : "https://app4clients.com/";
+const GUMROAD_PRODUCT_URL = "https://app4clients.gumroad.com/l/mazfe";
 const RECOMMENDED_PRICES_USD = {
            monthly: 2.99,
            yearly: 19.99,
@@ -181,8 +218,8 @@ const PHONE_COUNTRIES_BY_REGION = PHONE_REGION_ORDER.map((region) => ({
 })).filter((group) => group.countries.length > 0);
 
 const DEFAULT_TEMPLATES: Template[] = [
-  { name: "Rent", amount: 3000, dueDay: 1, category: "Housing", reminderDays: 3, type: "bill", repeat: "monthly" },
-  { name: "Internet", amount: 300, dueDay: 10, category: "Utilities", reminderDays: 2, type: "bill", repeat: "monthly" },
+  { name: "Rent", amount: 3000, dueDay: 1, category: "Housing", reminderDays: 3, type: "bill", repeat: "monthly", priority: "high" },
+  { name: "Internet", amount: 300, dueDay: 10, category: "Utilities", reminderDays: 2, type: "bill", repeat: "monthly", priority: "medium" },
   {
     name: "Netflix",
     amount: 99,
@@ -191,8 +228,9 @@ const DEFAULT_TEMPLATES: Template[] = [
     reminderDays: 2,
     type: "subscription",
     repeat: "monthly",
+    priority: "low",
   },
-  { name: "Gym", amount: 250, dueDay: 5, category: "Health", reminderDays: 2, type: "subscription", repeat: "monthly" },
+  { name: "Gym", amount: 250, dueDay: 5, category: "Health", reminderDays: 2, type: "subscription", repeat: "monthly", priority: "medium" },
 ];
 
 const seedItems: BillItem[] = [
@@ -205,6 +243,7 @@ const seedItems: BillItem[] = [
     reminderDays: 2,
     type: "bill",
     repeat: "monthly",
+    priority: "high",
     createdAt: new Date().toISOString(),
   },
   {
@@ -216,6 +255,7 @@ const seedItems: BillItem[] = [
     reminderDays: 2,
     type: "subscription",
     repeat: "monthly",
+    priority: "low",
     createdAt: new Date().toISOString(),
   },
 ];
@@ -250,9 +290,9 @@ function toUSD(amount: number, currency: Currency, rates: Record<Currency, numbe
   return amount * (rates[currency] || 1);
 }
 
-function fromUSD(amountMAD: number, currency: Currency, rates: Record<Currency, number>) {
+function fromUSD(amountUSD: number, currency: Currency, rates: Record<Currency, number>) {
   const divisor = rates[currency] || 1;
-  return amountMAD / divisor;
+  return amountUSD / divisor;
 }
 
 function toInternationalPhone(countryDial: string, localNumber: string) {
@@ -383,31 +423,13 @@ async function hashPin(pin: string): Promise<string> {
 }
 
 function playPremiumDueSound() {
-  if (!("AudioContext" in window)) {
-    return;
+  try {
+    const audio = new Audio("/sounds/payment-day.mp3");
+    audio.volume = 0.8;
+    void audio.play();
+  } catch {
+    // Silently fail if audio cannot play
   }
-
-  const audio = new AudioContext();
-  const now = audio.currentTime;
-  const notes = [740, 932, 1175];
-
-  notes.forEach((frequency, index) => {
-    const oscillator = audio.createOscillator();
-    const gain = audio.createGain();
-    oscillator.type = "sine";
-    oscillator.frequency.value = frequency;
-    gain.gain.setValueAtTime(0.0001, now + index * 0.15);
-    gain.gain.exponentialRampToValueAtTime(0.18, now + index * 0.15 + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.15 + 0.22);
-    oscillator.connect(gain);
-    gain.connect(audio.destination);
-    oscillator.start(now + index * 0.15);
-    oscillator.stop(now + index * 0.15 + 0.22);
-  });
-
-  window.setTimeout(() => {
-    void audio.close();
-  }, 700);
 }
 
 function EyeToggleIcon({ visible }: { visible: boolean }) {
@@ -489,6 +511,7 @@ export default function App() {
     password: "",
   });
   const [selectedPhoneCountry, setSelectedPhoneCountry] = useState("MA");
+  const [userCountry, setUserCountry] = useState<string>(() => readLS<string>("bill-tracker-user-country", ""));
   const [phoneLocalNumber, setPhoneLocalNumber] = useState("");
   const [items, setItems] = useState<BillItem[]>([]);
   const [templates, setTemplates] = useState<Template[]>(DEFAULT_TEMPLATES);
@@ -508,6 +531,7 @@ export default function App() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
   const [pin, setPin] = useState("");
   const [pinInput, setPinInput] = useState("");
   const [newPin, setNewPin] = useState("");
@@ -525,6 +549,48 @@ export default function App() {
     }
     if ("Notification" in window && Notification.permission === "granted") {
       setNotifEnabled(true);
+    }
+  }, []);
+
+      // ===== Force cache clear on every new build =====
+  useEffect(() => {
+    const BUILD_VERSION = "3.7";
+    const savedVersion = localStorage.getItem("app-build-version");
+
+    if (savedVersion === null) {
+      localStorage.setItem("app-build-version", BUILD_VERSION);
+      return;
+    }
+
+    if (savedVersion !== BUILD_VERSION) {
+      // Clear ALL cache
+      localStorage.setItem("app-build-version", BUILD_VERSION);
+      if ("caches" in window) {
+        caches.keys().then((names) => {
+          for (const name of names) {
+            caches.delete(name);
+          }
+        });
+      }
+      window.location.reload();
+    }
+  }, []);
+
+    // ===== Kill old service worker on update =====
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        for (const registration of registrations) {
+          registration.unregister();
+        }
+      });
+    }
+    if ("caches" in window) {
+      caches.keys().then((names) => {
+        for (const name of names) {
+          caches.delete(name);
+        }
+      });
     }
   }, []);
 
@@ -556,14 +622,45 @@ const [accountForm, setAccountForm] = useState({ name: "", type: "bank" as Accou
   const [newLimitAmount, setNewLimitAmount] = useState(0);
   const [lateFeeRules, setLateFeeRules] = useState<LateFeeRule[]>([]);
   const [lateFeeForm, setLateFeeForm] = useState({ name: "", feePerDay: 0, graceDays: 0 });
-  const [entitlement, setEntitlement] = useState<EntitlementState>({
+  const [billSplitAmount, setBillSplitAmount] = useState("");
+const [billSplitPeople, setBillSplitPeople] = useState("");
+const [billSplitTip, setBillSplitTip] = useState("");
+const [billSplitResult, setBillSplitResult] = useState<{ perPerson: number; totalWithTip: number; tipAmount: number } | null>(null);
+const [achievements, setAchievements] = useState<Achievement[]>([]);
+const [showAchievements, setShowAchievements] = useState(false);
+const [showNotifications, setShowNotifications] = useState(false);
+const [paymentStreak, setPaymentStreak] = useState(0);
+const [bestStreak, setBestStreak] = useState(0);
+
+const [dailyExpenses, setDailyExpenses] = useState<DailyExpense[]>([]);
+const [dailyExpenseForm, setDailyExpenseForm] = useState({ description: "", amount: 0, category: "Food" });
+const [showDailyExpense, setShowDailyExpense] = useState(false);
+const [deleteConfirmItem, setDeleteConfirmItem] = useState<BillItem | null>(null);
+const [editBalanceAccount, setEditBalanceAccount] = useState<Account | null>(null);
+const [editBalanceInput, setEditBalanceInput] = useState("");
+const [addToSavingsGoal, setAddToSavingsGoal] = useState<SavingsGoal | null>(null);
+const [addSavingsInput, setAddSavingsInput] = useState("");
+const [heatmapSelectedDay, setHeatmapSelectedDay] = useState<number | null>(null);
+
+const [reminderSettings, setReminderSettings] = useState<ReminderSettings>({
+  daysBefore: 3,
+  onDueDay: true,
+  daysAfter: 2,
+  soundEnabled: true,
+});
+    const [entitlement, setEntitlement] = useState<EntitlementState>({
     loading: false,
-premiumActive: true,
+premiumActive: false,
     productId: null,
     expiresAt: null,
     error: "",
   });
 
+    const [licenseKey, setLicenseKey] = useState("");
+  const [licenseEmail, setLicenseEmail] = useState("");
+  const [licenseActivating, setLicenseActivating] = useState(false);
+  const [licenseError, setLicenseError] = useState("");
+  const [showLicenseModal, setShowLicenseModal] = useState(false);
   const appUserId = currentUser?.appUserId ?? "";
   const userScopedKey = (key: string) => `${key}-${appUserId}`;
 
@@ -642,6 +739,8 @@ useEffect(() => {
     reminderDays: 3,
     type: "bill",
     repeat: "monthly",
+    note: "",
+    priority: "medium",
   });
 
 
@@ -689,7 +788,7 @@ const refreshExchangeRates = useCallback(async () => {
   }, [refreshExchangeRates]);
 
 // ✅ STEP 3: Then resetForm
-  const resetForm = () => {
+      const resetForm = () => {
     setForm({
       name: "",
       amount: 0,
@@ -698,6 +797,8 @@ const refreshExchangeRates = useCallback(async () => {
       reminderDays: 3,
       type: "bill",
       repeat: "monthly",
+      note: "",
+      priority: "medium",
     });
     setEditingItemId(null);
   };
@@ -736,7 +837,14 @@ const refreshExchangeRates = useCallback(async () => {
           throw new Error("Session invalid");
         }
 
-        setCurrentUser(payload.user);
+                setCurrentUser(payload.user);
+        if (payload.user.country) {
+          setUserCountry(payload.user.country);
+          localStorage.setItem("bill-tracker-user-country", JSON.stringify(payload.user.country));
+        } else {
+          const saved = readLS<string>("bill-tracker-user-country", "");
+          if (saved) setUserCountry(saved);
+        }
       } catch {
         localStorage.removeItem(STORAGE_KEYS.authToken);
         localStorage.removeItem(STORAGE_KEYS.authUser);
@@ -813,9 +921,11 @@ const refreshExchangeRates = useCallback(async () => {
     setTheme(readLS<"dark" | "light">(userScopedKey(STORAGE_KEYS.theme), "dark"));
     setAccounts(readLS<Account[]>(userScopedKey(STORAGE_KEYS.accounts), []));
     setPaymentHistory(readLS<PaymentRecord[]>(userScopedKey(STORAGE_KEYS.paymentHistory), []));
+        setDailyExpenses(readLS<DailyExpense[]>(userScopedKey(STORAGE_KEYS.dailyExpenses), []));
     const savedPin = localStorage.getItem(userScopedKey(STORAGE_KEYS.pin)) ?? "";
     setPin(savedPin);
     setLocked(Boolean(savedPin));
+        setReminderSettings(readLS<ReminderSettings>(userScopedKey("bill-tracker-reminder-settings"), { daysBefore: 3, onDueDay: true, daysAfter: 2, soundEnabled: true }));
   }, [appUserId]);
 
 
@@ -827,7 +937,7 @@ const refreshEntitlement = useCallback(async () => {
   if (!BILLING_BACKEND_URL) {
     setEntitlement({
       loading: false,
-      premiumActive: true,
+      premiumActive: false,
       productId: null,
       expiresAt: null,
       error: "Set VITE_BILLING_API_BASE_URL to enable server entitlement checks.",
@@ -853,7 +963,7 @@ const refreshEntitlement = useCallback(async () => {
 
     setEntitlement({
       loading: false,
-     premiumActive: true,
+          premiumActive: payload.premiumActive ?? false,
       productId: payload.productId ?? null,
       expiresAt: payload.expiresAt ?? null,
       error: "",
@@ -892,7 +1002,57 @@ useEffect(() => {
   };
 }, [refreshEntitlement]);
 
- 
+
+  const verifyLicense = useCallback(async () => {
+    if (!BILLING_BACKEND_URL) {
+      setLicenseError("Billing API not configured.");
+      return;
+    }
+    if (!licenseKey.trim() || !licenseEmail.trim()) {
+      setLicenseError("Please enter both email and license key.");
+      return;
+    }
+
+    setLicenseActivating(true);
+    setLicenseError("");
+
+    try {
+      const response = await fetch(`${BILLING_BACKEND_URL}/api/license/activate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          appUserId,
+          email: licenseEmail.trim(),
+          licenseCode: licenseKey.trim(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || "License activation failed.");
+      }
+
+      localStorage.setItem(userScopedKey("bill-tracker-license-key"), licenseKey.trim());
+      localStorage.setItem(userScopedKey("bill-tracker-license-email"), licenseEmail.trim());
+
+      setEntitlement({
+        loading: false,
+        premiumActive: data.premiumActive ?? true,
+        productId: data.productId ?? null,
+        expiresAt: data.expiresAt ?? null,
+        error: "",
+      });
+
+      setToastMessage("🎉 License activated! Premium unlocked.");
+    } catch (error) {
+      setLicenseError(error instanceof Error ? error.message : "Activation failed.");
+      setToastMessage("❌ License activation failed.");
+    } finally {
+      setLicenseActivating(false);
+    }
+  }, [appUserId, licenseKey, licenseEmail]);
+
 useEffect(() => {
     if (!appUserId) return;
   
@@ -927,7 +1087,11 @@ useEffect(() => {
 
    localStorage.setItem(userScopedKey(STORAGE_KEYS.paymentHistory), JSON.stringify(paymentHistory.slice(0, 200)));
 
- }, [items, templates, currency, budget, dueDaySoundEnabled, notificationCenter, appUserId, incomes, savingsGoals, categoryLimits, lateFeeRules, theme, accounts, paymentHistory]);
+      localStorage.setItem(userScopedKey(STORAGE_KEYS.dailyExpenses), JSON.stringify(dailyExpenses.slice(0, 500)));
+
+  localStorage.setItem(userScopedKey("bill-tracker-reminder-settings"), JSON.stringify(reminderSettings));
+
+ }, [items, templates, currency, budget, dueDaySoundEnabled, notificationCenter, appUserId, incomes, savingsGoals, categoryLimits, lateFeeRules, theme, accounts, paymentHistory, dailyExpenses, reminderSettings]);
   
   
   useEffect(() => {
@@ -1006,8 +1170,17 @@ const formatMoney = useCallback((amountMAD: number) => {
     }).format(fromUSD(amountMAD, currency, currencyToUSD));
   }, [currency, currencyToUSD]);
 
-  const pushNotificationCenter = (entry: Omit<NotificationEntry, "id" | "createdAt">) => {
-    setNotificationCenter((prev) => [{ id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...entry }, ...prev].slice(0, 60));
+    const markAllNotificationsRead = () => {
+    setNotificationCenter((prev) => prev.map((n) => ({ ...n, read: true })));
+  };
+
+  const clearNotifications = () => {
+    setNotificationCenter([]);
+    setToastMessage("Notifications cleared.");
+  };
+
+    const pushNotificationCenter = (entry: Omit<NotificationEntry, "id" | "createdAt" | "read">) => {
+    setNotificationCenter((prev) => [{ id: crypto.randomUUID(), createdAt: new Date().toISOString(), read: false, ...entry }, ...prev].slice(0, 60));
   };
 
   useEffect(() => {
@@ -1437,9 +1610,10 @@ localStorage.setItem(snapshotKey, JSON.stringify(monthlyTotal));
         (statusFilter === "dueSoon" && !item.paid && item.daysUntil >= 0 && item.daysUntil <= 3) ||
         (statusFilter === "paid" && item.paid) ||
         (statusFilter === "unpaid" && !item.paid);
-      return bySearch && byCategory && byStatus;
+            const byPriority = priorityFilter === "all" || item.priority === priorityFilter;
+      return bySearch && byCategory && byStatus && byPriority;
     });
-  }, [withDue, debouncedSearch, categoryFilter, statusFilter]);
+  }, [withDue, debouncedSearch, categoryFilter, statusFilter, priorityFilter]);
 
   const categoryTotals = useMemo(() => {
     const map = new Map<string, number>();
@@ -1469,7 +1643,9 @@ localStorage.setItem(snapshotKey, JSON.stringify(monthlyTotal));
     });
   }, [savingsRate, budgetProgress, withDue, items, monthlyIncome, budget, savingsGoals, categoryLimits, categoryLimitStatus, totalLateFees, totalAccountBalance, monthlyTotal]);
 
-  const canUsePremiumFeatures = true;
+    const unreadNotificationCount = useMemo(() => notificationCenter.filter((n) => !n.read).length, [notificationCenter]);
+
+ const canUsePremiumFeatures = entitlement.premiumActive;
   const freeItemsLeft = Math.max(0, FREE_ITEM_LIMIT - items.length);
   const subscriptionExpired = Boolean(entitlement.expiresAt) && !canUsePremiumFeatures && new Date(entitlement.expiresAt as string).getTime() <= Date.now();
 
@@ -1504,6 +1680,127 @@ localStorage.setItem(snapshotKey, JSON.stringify(monthlyTotal));
     }
   }, [withDue, canUsePremiumFeatures, notifEnabled, dueDaySoundEnabled, appUserId]);
 
+    // ===== PAYMENT STREAK =====
+  const streakInfo = useMemo(() => {
+    const historyByMonth = new Map<string, { total: number; paid: number }>();
+
+    paymentHistory.forEach((ph) => {
+      const date = new Date(ph.paidAt);
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+      const entry = historyByMonth.get(key) || { total: 0, paid: 0 };
+      entry.paid += 1;
+      historyByMonth.set(key, entry);
+    });
+
+    let currentStreak = 0;
+    let best = 0;
+    const now = new Date();
+
+    for (let i = 0; i < 24; i++) {
+      const checkDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, "0")}`;
+      const snapshotKey = getSnapshotKey(userScopedKey, checkDate);
+      const monthTotal = readLS<number>(snapshotKey, -1);
+
+      if (monthTotal === -1 && i > 0) break;
+
+      const history = historyByMonth.get(key);
+      const wasPaid = history && history.paid >= Math.max(1, monthTotal > 0 ? 1 : 0);
+
+      if (i === 0) {
+        const allPaidThisMonth = items.length > 0 && items.every((item) => isPaidThisMonth(item));
+        if (allPaidThisMonth) {
+          currentStreak++;
+        } else if (items.length === 0) {
+          currentStreak++;
+        }
+      } else if (wasPaid || monthTotal <= 0) {
+        currentStreak++;
+      } else {
+        break;
+      }
+      best = Math.max(best, currentStreak);
+    }
+
+    best = Math.max(best, currentStreak);
+
+    return { current: currentStreak, best };
+  }, [paymentHistory, items, appUserId]);
+
+  useEffect(() => {
+    setPaymentStreak(streakInfo.current);
+    setBestStreak(streakInfo.best);
+  }, [streakInfo]);
+
+    // ===== MONTHLY COMPARISON =====
+    const monthlyComparison = useMemo(() => {
+    if (!appUserId) return null;
+
+    const now = new Date();
+    const currentMonthKey = getSnapshotKey(userScopedKey, now);
+
+    const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonthKey = getSnapshotKey(userScopedKey, prevMonthDate);
+
+    const currentTotal = readLS<number>(currentMonthKey, 0);
+    const previousTotal = readLS<number>(prevMonthKey, 0);
+
+        if (previousTotal === 0 && currentTotal === 0) return null;
+
+    const diff = currentTotal - previousTotal;
+    const percentChange = previousTotal > 0 ? Math.round((diff / previousTotal) * 100) : 0;
+
+    const currentByCategory = new Map<string, number>();
+    const previousByCategory = new Map<string, number>();
+
+    items.forEach((item) => {
+      currentByCategory.set(item.category, (currentByCategory.get(item.category) ?? 0) + item.amount);
+    });
+
+        const previousCategoriesData = readLS<Record<string, number>>(userScopedKey("bill-tracker-snapshot-categories-" + prevMonthKey), {});
+    const allCategories = Array.from(new Set([
+      ...currentByCategory.keys(),
+      ...Object.keys(previousCategoriesData),
+    ]));
+
+    const categoryComparisons = allCategories.map((cat) => {
+      const current = currentByCategory.get(cat) ?? 0;
+            const previous = previousCategoriesData[cat] ?? 0;
+      const catDiff = current - previous;
+      const catPercent = previous > 0 ? Math.round((catDiff / previous) * 100) : 0;
+
+      return {
+        category: cat,
+        current,
+        previous,
+        diff: catDiff,
+        percent: catPercent,
+        direction: catDiff > 0 ? "up" as const : catDiff < 0 ? "down" as const : "same" as const,
+      };
+    }).filter((c) => c.current > 0 || c.previous > 0)
+      .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+
+    return {
+      currentTotal,
+      previousTotal,
+      diff,
+      percentChange,
+      direction: diff > 0 ? "up" as const : diff < 0 ? "down" as const : "same" as const,
+      categories: categoryComparisons,
+    };
+  }, [appUserId, items]);
+
+  useEffect(() => {
+    if (!appUserId || items.length === 0) return;
+    const now = new Date();
+    const snapshotKey = getSnapshotKey(userScopedKey, now);
+    const catMap: Record<string, number> = {};
+    items.forEach((item) => {
+      catMap[item.category] = (catMap[item.category] ?? 0) + item.amount;
+    });
+    localStorage.setItem(userScopedKey("bill-tracker-snapshot-categories-" + snapshotKey), JSON.stringify(catMap));
+  }, [items, appUserId]);
+
   const inactiveSubscriptions = useMemo(() => {
     const now = new Date();
     return items.filter((item) => {
@@ -1516,6 +1813,286 @@ localStorage.setItem(snapshotKey, JSON.stringify(monthlyTotal));
       return now.getTime() - new Date(item.lastPaidAt).getTime() > 30 * DAY_MS;
     });
   }, [items]);
+
+const calculateBillSplit = () => {
+    const amount = Number(billSplitAmount);
+    const people = Number(billSplitPeople);
+    const tipPercent = Number(billSplitTip) || 0;
+
+    if (!amount || amount <= 0) {
+      setToastMessage("Enter a valid amount.");
+      return;
+    }
+    if (!people || people < 1 || people > 100) {
+      setToastMessage("Enter number of people (1-100).");
+      return;
+    }
+
+    const tipAmount = amount * (tipPercent / 100);
+    const totalWithTip = amount + tipAmount;
+    const perPerson = totalWithTip / people;
+
+    setBillSplitResult({
+      perPerson: Math.round(perPerson * 100) / 100,
+      totalWithTip: Math.round(totalWithTip * 100) / 100,
+      tipAmount: Math.round(tipAmount * 100) / 100,
+    });
+  };
+
+    // ===== DAILY EXPENSES =====
+  const DAILY_EXPENSE_CATEGORIES = ["Food", "Transport", "Shopping", "Health", "Entertainment", "Education", "Bills", "Gift", "Other"];
+
+  const addDailyExpense = () => {
+    if (!dailyExpenseForm.description.trim() || dailyExpenseForm.amount <= 0) {
+      setToastMessage("Enter description and amount.");
+      return;
+    }
+    setDailyExpenses((prev) => [
+      {
+        id: crypto.randomUUID(),
+        description: dailyExpenseForm.description.trim(),
+        amount: toUSD(dailyExpenseForm.amount, currency, currencyToUSD),
+        category: dailyExpenseForm.category,
+        date: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+      ...prev,
+    ].slice(0, 500));
+    setDailyExpenseForm({ description: "", amount: 0, category: "Food" });
+    setToastMessage("Expense logged!");
+  };
+
+  const removeDailyExpense = (id: string) => {
+    setDailyExpenses((prev) => prev.filter((e) => e.id !== id));
+    setToastMessage("Expense removed.");
+  };
+
+  const todayExpenses = useMemo(() => {
+    const today = new Date().toDateString();
+    return dailyExpenses.filter((e) => new Date(e.date).toDateString() === today);
+  }, [dailyExpenses]);
+
+  const todayTotal = useMemo(() => todayExpenses.reduce((sum, e) => sum + e.amount, 0), [todayExpenses]);
+
+  const weekExpenses = useMemo(() => {
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * DAY_MS);
+    return dailyExpenses.filter((e) => new Date(e.date) >= weekAgo);
+  }, [dailyExpenses]);
+
+  const weekTotal = useMemo(() => weekExpenses.reduce((sum, e) => sum + e.amount, 0), [weekExpenses]);
+
+  const monthlyExpenseTotal = useMemo(() => {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    return dailyExpenses.filter((e) => new Date(e.date) >= monthStart).reduce((sum, e) => sum + e.amount, 0);
+  }, [dailyExpenses]);
+
+    // ===== SPENDING HEATMAP =====
+  const heatmapData = useMemo(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    const dailyTotals = new Map<number, number>();
+
+    dailyExpenses.forEach((exp) => {
+      const expDate = new Date(exp.date);
+      if (expDate.getMonth() === month && expDate.getFullYear() === year) {
+        const day = expDate.getDate();
+        dailyTotals.set(day, (dailyTotals.get(day) ?? 0) + exp.amount);
+      }
+    });
+
+    items.forEach((item) => {
+      const safeDay = Math.min(item.dueDay, daysInMonth);
+      dailyTotals.set(safeDay, (dailyTotals.get(safeDay) ?? 0) + item.amount);
+    });
+
+    let maxAmount = 0;
+    dailyTotals.forEach((val) => {
+      if (val > maxAmount) maxAmount = val;
+    });
+
+    const days: { day: number; amount: number; intensity: number; hasBills: boolean; hasExpenses: boolean }[] = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      const amount = dailyTotals.get(d) ?? 0;
+      const intensity = maxAmount > 0 ? amount / maxAmount : 0;
+      const hasBills = items.some((item) => Math.min(item.dueDay, daysInMonth) === d);
+      const hasExpenses = dailyExpenses.some((exp) => {
+        const expDate = new Date(exp.date);
+        return expDate.getDate() === d && expDate.getMonth() === month && expDate.getFullYear() === year;
+      });
+      days.push({ day: d, amount, intensity, hasBills, hasExpenses });
+    }
+
+    return { days, maxAmount };
+  }, [dailyExpenses, items]);
+
+  const dailyExpenseByCategory = useMemo(() => {
+    const map = new Map<string, number>();
+    todayExpenses.forEach((e) => map.set(e.category, (map.get(e.category) ?? 0) + e.amount));
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+  }, [todayExpenses]);
+
+  const resetBillSplit = () => {
+    setBillSplitAmount("");
+    setBillSplitPeople("");
+    setBillSplitTip("");
+    setBillSplitResult(null);
+  };
+
+    // ===== ACHIEVEMENTS SYSTEM =====
+  const checkAndUnlockAchievements = useCallback(() => {
+    if (!appUserId) return;
+    const existing = readLS<Achievement[]>(userScopedKey("bill-tracker-achievements"), []);
+    const unlockedIds = new Set(existing.map((a) => a.id));
+    const newAchievements: Achievement[] = [];
+    const now = new Date().toISOString();
+
+    const tryUnlock = (id: string, icon: string, title: string, desc: string) => {
+      if (!unlockedIds.has(id)) {
+        newAchievements.push({ id, icon, title, description: desc, unlockedAt: now });
+      }
+    };
+
+    // Bill achievements
+    if (items.length >= 1) tryUnlock("first_bill", "🎯", "First Bill", "Added your first bill!");
+    if (items.length >= 5) tryUnlock("bills_5", "📝", "Getting Organized", "Tracking 5+ bills");
+    if (items.length >= 10) tryUnlock("bills_10", "📊", "Bill Master", "Tracking 10+ bills");
+    if (items.length >= 20) tryUnlock("bills_20", "🏆", "Super Tracker", "Tracking 20+ bills!");
+
+    // Payment achievements
+    if (items.length > 0 && items.every((item) => isPaidThisMonth(item))) {
+      tryUnlock("all_paid", "✅", "All Paid!", "All bills paid this month!");
+    }
+    const paidCount = paymentHistory.length;
+    if (paidCount >= 1) tryUnlock("first_payment", "💰", "First Payment", "Marked your first bill as paid");
+    if (paidCount >= 10) tryUnlock("payments_10", "💪", "Consistent Payer", "10+ payments recorded");
+    if (paidCount >= 50) tryUnlock("payments_50", "🔥", "Payment Pro", "50+ payments recorded!");
+
+    // Savings achievements
+    if (savingsRate >= 20) tryUnlock("saver_20", "🐷", "Good Saver", "Saving 20%+ of income");
+    if (savingsRate >= 30) tryUnlock("saver_30", "🌟", "Super Saver", "Saving 30%+ of income!");
+    if (savingsGoals.length >= 1) tryUnlock("first_goal", "🎯", "Goal Setter", "Created your first savings goal");
+    if (savingsGoals.some((g) => g.savedAmount >= g.targetAmount)) tryUnlock("goal_reached", "🎉", "Goal Reached!", "Completed a savings goal!");
+
+    // Budget achievements
+    if (budget > 0) tryUnlock("budget_set", "📋", "Budget Planner", "Set a monthly budget");
+    if (budget > 0 && budgetProgress <= 80) tryUnlock("under_budget", "💚", "Under Budget", "Spending under 80% of budget");
+
+    // Setup achievements
+    if (monthlyIncome > 0) tryUnlock("income_set", "💵", "Income Tracker", "Added your monthly income");
+    if (accounts.length >= 1) tryUnlock("first_account", "🏦", "Account Added", "Added your first account");
+    if (categoryLimits.length >= 1) tryUnlock("first_limit", "🏷️", "Limit Setter", "Set your first spending limit");
+
+    // Financial health
+    if (financialHealth.score >= 80) tryUnlock("health_80", "💯", "Financial Champion", "Health score 80+!");
+    if (financialHealth.score >= 100) tryUnlock("health_100", "👑", "Perfect Score!", "100/100 financial health!");
+
+        // Streak achievements
+    if (paymentStreak >= 1) tryUnlock("streak_1", "🔥", "First Streak!", "1 month of on-time payments");
+    if (paymentStreak >= 3) tryUnlock("streak_3", "⭐", "3 Month Streak", "3 consecutive months paid on time!");
+    if (paymentStreak >= 6) tryUnlock("streak_6", "🏆", "6 Month Streak!", "Half a year of perfect payments!");
+    if (paymentStreak >= 12) tryUnlock("streak_12", "👑", "1 Year Streak!", "A full year of on-time payments! LEGENDARY!");
+
+    if (newAchievements.length > 0) {
+      const all = [...newAchievements, ...existing].slice(0, 50);
+      setAchievements(all);
+      localStorage.setItem(userScopedKey("bill-tracker-achievements"), JSON.stringify(all));
+            newAchievements.forEach((ach) => {
+        pushNotificationCenter({
+          title: "Achievement Unlocked!",
+          detail: `${ach.icon} ${ach.title} — ${ach.description}`,
+          type: "achievement",
+        });
+      });
+      if (newAchievements.length === 1) {
+        setToastMessage(`🏆 Achievement unlocked: ${newAchievements[0].title}!`);
+      } else {
+        setToastMessage(`🏆 ${newAchievements.length} achievements unlocked!`);
+      }
+    }
+  }, [appUserId, items, paymentHistory, savingsRate, savingsGoals, budget, budgetProgress, monthlyIncome, accounts, categoryLimits, financialHealth.score]);
+
+  useEffect(() => {
+    if (appUserId) {
+      const existing = readLS<Achievement[]>(userScopedKey("bill-tracker-achievements"), []);
+      setAchievements(existing);
+    }
+  }, [appUserId]);
+
+  useEffect(() => {
+    if (!appUserId || items.length === 0) return;
+    const timer = setTimeout(() => {
+      checkAndUnlockAchievements();
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [checkAndUnlockAchievements, appUserId, items.length]);
+
+  // ===== AI PREDICTIONS =====
+  const aiPrediction = useMemo(() => {
+    if (last6MonthsTotals.length < 2) return null;
+    const totals = last6MonthsTotals.map((m) => m.total).filter((t) => t > 0);
+    if (totals.length < 2) return null;
+    const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
+    const trend = totals[totals.length - 1] - totals[0];
+    const trendPercent = totals[0] > 0 ? Math.round((trend / totals[0]) * 100) : 0;
+    const nextMonthEstimate = Math.round(avg * 1.05);
+    return {
+      average: avg,
+      trend,
+      trendPercent,
+      trendDirection: trend > 0 ? "up" as const : trend < 0 ? "down" as const : "stable" as const,
+      nextMonthEstimate,
+      confidence: totals.length >= 4 ? "high" : totals.length >= 3 ? "medium" : "low",
+    };
+  }, [last6MonthsTotals]);
+
+  // ===== PAYMENT COUNTDOWN =====
+  const nextPaymentCountdown = useMemo(() => {
+    const unpaid = withDue.filter((item) => !item.paid && item.daysUntil >= 0);
+    if (unpaid.length === 0) return null;
+    unpaid.sort((a, b) => a.daysUntil - b.daysUntil);
+    const next = unpaid[0];
+    return {
+      name: next.name,
+      amount: next.amount,
+      daysLeft: next.daysUntil,
+      isToday: next.daysUntil === 0,
+      isTomorrow: next.daysUntil === 1,
+    };
+  }, [withDue]);
+
+  // ===== MONTHLY REPORT =====
+  const generateMonthlyReport = () => {
+    const now = new Date();
+    const monthName = now.toLocaleDateString("en", { month: "long", year: "numeric" });
+    const paidCount = items.filter((item) => isPaidThisMonth(item)).length;
+    const unpaidCount = items.length - paidCount;
+    const overdueCount = withDue.filter((item) => !item.paid && item.daysUntil < 0).length;
+
+    pushNotificationCenter({
+      title: `📊 Monthly Report - ${monthName}`,
+      detail: `Bills: ${items.length} | Paid: ${paidCount} | Unpaid: ${unpaidCount} | Total: ${formatMoney(monthlyTotal)} | Balance: ${formatMoney(balance)}`,
+      type: "insight",
+    });
+    setToastMessage(`📊 Report saved to notifications!`);
+  };
+
+  // ===== RECURRENCE INFO =====
+  const getRecurrenceLabel = (repeat: string) => {
+    switch (repeat) {
+      case "weekly": return "Weekly";
+      case "biweekly": return "Bi-weekly";
+      case "monthly": return "Monthly";
+      case "quarterly": return "Quarterly";
+      case "yearly": return "Yearly";
+      default: return "Monthly";
+    }
+  };
+
 
   const applyTemplate = (template: Template) => {
     setForm(template);
@@ -1659,7 +2236,7 @@ localStorage.setItem(snapshotKey, JSON.stringify(monthlyTotal));
     }
     setInlineEditId(null);
     setEditingItemId(id);
-    setForm({
+        setForm({
       name: selectedItem.name,
       amount: selectedItem.amount,
       dueDay: selectedItem.dueDay,
@@ -1667,6 +2244,8 @@ localStorage.setItem(snapshotKey, JSON.stringify(monthlyTotal));
       reminderDays: selectedItem.reminderDays,
       type: selectedItem.type,
       repeat: selectedItem.repeat,
+      note: selectedItem.note || "",
+      priority: selectedItem.priority || "medium",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -1761,69 +2340,6 @@ localStorage.setItem(snapshotKey, JSON.stringify(monthlyTotal));
     setToastMessage(granted ? "Notifications enabled!" : "Permission not granted.");
   };
 
-  const exportBackup = () => {
-    const payload = {
-      items,
-      templates,
-      currency,
-      budget,
-      pin,
-      exportedAt: new Date().toISOString(),
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const href = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = href;
-    a.download = "bill-tracker-backup.json";
-    a.click();
-    URL.revokeObjectURL(href);
-  };
-
-  const restoreBackup = async (file: File) => {
-  try {
-    const text = await file.text();
-    const data = JSON.parse(text) as Partial<{
-      version: number;
-      items: BillItem[];
-      templates: Template[];
-      currency: Currency;
-      budget: number;
-      pin: string;
-      incomes: IncomeEntry[];
-      savingsGoals: SavingsGoal[];
-      categoryLimits: CategoryLimit[];
-      lateFeeRules: LateFeeRule[];
-      accounts: Account[];
-      theme: "dark" | "light";
-      notificationCenter: NotificationEntry[];
-    }>;
-
-    let restoredCount = 0;
-
-    if (data.items) { setItems(data.items); restoredCount++; }
-    if (data.templates) { setTemplates(data.templates); restoredCount++; }
-    if (data.currency) { setCurrency(data.currency); restoredCount++; }
-    if (typeof data.budget === "number") { setBudget(data.budget); restoredCount++; }
-    if (typeof data.pin === "string") {
-      setPin(data.pin);
-      localStorage.setItem(userScopedKey(STORAGE_KEYS.pin), data.pin);
-      setLocked(Boolean(data.pin));
-      restoredCount++;
-    }
-    if (data.incomes) { setIncomes(data.incomes); restoredCount++; }
-    if (data.savingsGoals) { setSavingsGoals(data.savingsGoals); restoredCount++; }
-    if (data.categoryLimits) { setCategoryLimits(data.categoryLimits); restoredCount++; }
-    if (data.lateFeeRules) { setLateFeeRules(data.lateFeeRules); restoredCount++; }
-    if (data.accounts) { setAccounts(data.accounts); restoredCount++; }
-    if (data.theme) { setTheme(data.theme); restoredCount++; }
-    if (data.notificationCenter) { setNotificationCenter(data.notificationCenter); restoredCount++; }
-
-    setToastMessage(`Backup restored! (${restoredCount} sections recovered)`);
-  } catch {
-    setToastMessage("Invalid backup file. Please select a valid JSON backup.");
-  }
-};
-
   const setPinCode = async () => {
     if (!/^\d{4,8}$/.test(newPin)) {
       setToastMessage("PIN must be 4-8 digits.");
@@ -1845,394 +2361,13 @@ localStorage.setItem(snapshotKey, JSON.stringify(monthlyTotal));
     setToastMessage("PIN removed successfully.");
   };
 
-  const handleAuthSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    setAuthError("");
+  
 
-    if (!AUTH_API_BASE_URL) {
-      setAuthError("Set VITE_AUTH_API_BASE_URL to enable login/signup.");
-      return;
-    }
+  
 
-    const countrySelection = PHONE_COUNTRIES.find((country) => country.code === selectedPhoneCountry) ?? PHONE_COUNTRIES[0];
-    const normalizedPhone = toInternationalPhone(countrySelection.dial, phoneLocalNumber);
+  
 
-    if (authMode === "signup") {
-      if (!authForm.fullName.trim() || !authForm.username.trim() || !authForm.email.trim() || !phoneLocalNumber.trim()) {
-        setAuthError("Please fill all signup fields.");
-        return;
-      }
-
-      if (!EMAIL_REGEX.test(authForm.email.trim())) {
-        setAuthError("Email is invalid. Please enter a valid email address.");
-        return;
-      }
-
-      if (containsBlockedUsernameWord(authForm.username.trim(), blockedUsernameWords, allowedUsernames)) {
-        setAuthError("Username contains blocked words. Please choose a different username.");
-        return;
-      }
-
-      if (!/^\+\d{8,15}$/.test(normalizedPhone)) {
-        setAuthError("Enter a valid phone number for the selected country.");
-        return;
-      }
-    }
-
-    if (!authForm.password || authForm.password.length < 8) {
-      setAuthError("Password must be at least 8 characters.");
-      return;
-    }
-
-    setAuthSubmitting(true);
-    try {
-      const endpoint = authMode === "signup" ? "/api/auth/signup" : "/api/auth/login";
-      const payload =
-        authMode === "signup"
-          ? {
-              fullName: authForm.fullName.trim(),
-              phoneNumber: normalizedPhone,
-              username: authForm.username.trim(),
-              email: authForm.email.trim(),
-              password: authForm.password,
-            }
-          : {
-              username: authForm.username.trim(),
-              password: authForm.password,
-            };
-
-      const response = await fetch(`${AUTH_API_BASE_URL}${endpoint}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = (await response.json()) as {
-        ok?: boolean;
-        token?: string;
-        user?: AuthUser;
-        code?: string;
-        message?: string;
-        requiresEmailVerification?: boolean;
-        verificationEmail?: string;
-        verificationCode?: string;
-        expiresInHours?: number;
-        retryAfterSeconds?: number;
-      };
-
-      if (!response.ok || !data.ok) {
-        if (data.code === "BLOCKED_USERNAME") {
-          throw new Error("Username contains blocked words. Please choose a different username.");
-        }
-        if (data.code === "INVALID_EMAIL") {
-          throw new Error("Email is invalid. Please enter a valid email address.");
-        }
-        if (data.code === "EMAIL_NOT_VERIFIED") {
-          setVerificationEmail(data.verificationEmail?.trim() || authForm.email.trim());
-          setVerificationInfo("Email not verified. Verify your email, then sign in again with your latest password.");
-          throw new Error(data.message ?? "Email not verified. Verify your email to continue.");
-        }
-        if (data.code === "LOGIN_LOCKED") {
-          throw new Error(data.message ?? `Too many failed attempts. Try again in ${data.retryAfterSeconds ?? 0}s.`);
-        }
-        throw new Error(data.code ?? "Authentication failed");
-      }
-
-      if (authMode === "signup") {
-        setVerificationEmail(authForm.email.trim());
-        setVerificationCode(data.verificationCode ?? "");
-        setVerificationInfo(
-          data.verificationCode
-            ? "Verification code generated. It has been auto-filled for testing."
-            : `Verification code sent to ${authForm.email.trim()}. Check inbox/spam and enter it below.`,
-        );
-        setAuthMode("login");
-        setAuthError("");
-        setToastMessage("Account created. Verify your email to continue.");
-      } else if (data.token && data.user) {
-        localStorage.setItem(STORAGE_KEYS.authToken, data.token);
-        localStorage.setItem(STORAGE_KEYS.authUser, JSON.stringify(data.user));
-        setCurrentUser(data.user);
-        setToastMessage("Welcome back.");
-      } else {
-        throw new Error("Authentication response missing token.");
-      }
-
-      setAuthForm({
-        fullName: "",
-        username: "",
-        email: "",
-        phoneNumber: "+212",
-        password: "",
-      });
-      setSelectedPhoneCountry("MA");
-      setPhoneLocalNumber("");
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "Authentication failed");
-    } finally {
-      setAuthSubmitting(false);
-    }
-  };
-
-  const handleForgotPasswordRequest = async (isResend = false) => {
-    setAuthError("");
-    setForgotPasswordInfo("");
-
-    if (isResend && forgotPasswordResendAvailableAt > Date.now()) {
-      return;
-    }
-
-    if (!AUTH_API_BASE_URL) {
-      setAuthError("Set VITE_AUTH_API_BASE_URL to enable password reset.");
-      return;
-    }
-
-    if (!EMAIL_REGEX.test(forgotPasswordEmail.trim())) {
-      setAuthError("Enter a valid email before requesting a reset code.");
-      return;
-    }
-
-    setForgotPasswordSubmitting(true);
-    try {
-      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/forgot-password`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email: forgotPasswordEmail.trim() }),
-      });
-
-      const data = (await response.json()) as {
-        ok?: boolean;
-        message?: string;
-        resetToken?: string;
-        resetCode?: string;
-        expiresInMinutes?: number;
-      };
-
-      if (!response.ok || !data.ok) {
-        throw new Error(data.message ?? "Unable to request password reset.");
-      }
-
-      const debugToken = data.resetCode ?? data.resetToken;
-      if (debugToken) {
-        setForgotPasswordToken(debugToken);
-      }
-      setForgotPasswordStep("reset");
-      setForgotPasswordExpiresInMinutes(typeof data.expiresInMinutes === "number" ? data.expiresInMinutes : null);
-      setForgotPasswordResendAvailableAt(Date.now() + 60 * 1000);
-      setForgotPasswordNow(Date.now());
-
-      if (debugToken) {
-        setForgotPasswordInfo(
-          "Reset code generated. It has been auto-filled for testing. Set a new password below.",
-        );
-      } else {
-        setForgotPasswordInfo(
-          `Reset code sent to ${forgotPasswordEmail.trim()}. Check inbox and spam, then enter the code below.`,
-        );
-      }
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "Unable to request password reset.");
-    } finally {
-      setForgotPasswordSubmitting(false);
-    }
-  };
-
-  const handleForgotPasswordReset = async () => {
-    setAuthError("");
-    setForgotPasswordInfo("");
-
-    if (!AUTH_API_BASE_URL) {
-      setAuthError("Set VITE_AUTH_API_BASE_URL to enable password reset.");
-      return;
-    }
-
-    if (!EMAIL_REGEX.test(forgotPasswordEmail.trim())) {
-      setAuthError("Enter the same valid email used during signup.");
-      return;
-    }
-
-    if (!forgotPasswordToken.trim() || forgotPasswordToken.trim().length < 8) {
-      setAuthError("Enter a valid reset code.");
-      return;
-    }
-
-    if (forgotPasswordNewPassword.length < 8) {
-      setAuthError("New password must be at least 8 characters.");
-      return;
-    }
-
-    setForgotPasswordSubmitting(true);
-    try {
-      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/reset-password`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: forgotPasswordEmail.trim(),
-          resetToken: forgotPasswordToken.trim(),
-          newPassword: forgotPasswordNewPassword,
-        }),
-      });
-
-      const data = (await response.json()) as {
-        ok?: boolean;
-        code?: string;
-        message?: string;
-      };
-
-      if (!response.ok || !data.ok) {
-        if (data.code === "INVALID_RESET_TOKEN") {
-          throw new Error("Reset code is invalid or expired.");
-        }
-        throw new Error(data.message ?? "Unable to reset password.");
-      }
-
-      // Force logout after password reset so old sessions cannot create confusion.
-      localStorage.removeItem(STORAGE_KEYS.authToken);
-      localStorage.removeItem(STORAGE_KEYS.authUser);
-      setCurrentUser(null);
-      setLocked(false);
-      setPinInput("");
-      setShowPremiumPanel(false);
-
-      const targetEmail = forgotPasswordEmail.trim();
-
-      setForgotPasswordInfo("Password updated. Verify your email before signing in.");
-      setForgotPasswordOpen(false);
-      setForgotPasswordStep("request");
-      setForgotPasswordToken("");
-      setForgotPasswordNewPassword("");
-      setForgotPasswordResendAvailableAt(0);
-      setForgotPasswordExpiresInMinutes(null);
-      setAuthMode("login");
-      setVerificationEmail(targetEmail);
-      setVerificationCode("");
-      setVerificationInfo("Password updated. Email not verified yet. Tap \"Send verification code now\" below.");
-      setAuthForm((prev) => ({ ...prev, password: "" }));
-      setToastMessage("Password updated. Verify your email to sign in.");
-
-      setVerificationSubmitting(true);
-      try {
-        await requestVerificationCode(targetEmail, "post_reset");
-      } catch (verificationError) {
-        setAuthError(
-          verificationError instanceof Error
-            ? verificationError.message
-            : "Password updated, but verification email could not be sent.",
-        );
-      } finally {
-        setVerificationSubmitting(false);
-      }
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "Unable to reset password.");
-    } finally {
-      setForgotPasswordSubmitting(false);
-    }
-  };
-
-  const handleVerifyEmail = async (event: FormEvent) => {
-    event.preventDefault();
-    setAuthError("");
-    if (!AUTH_API_BASE_URL) {
-      setAuthError("Set VITE_AUTH_API_BASE_URL to verify email.");
-      return;
-    }
-    if (!EMAIL_REGEX.test(verificationEmail.trim())) {
-      setAuthError("Enter a valid verification email.");
-      return;
-    }
-    if (verificationCode.trim().length < 8) {
-      setAuthError("Enter a valid verification code.");
-      return;
-    }
-
-    setVerificationSubmitting(true);
-    try {
-      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/verify-email`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: verificationEmail.trim(),
-          verificationCode: verificationCode.trim(),
-        }),
-      });
-      const data = (await response.json()) as {
-        ok?: boolean;
-        token?: string;
-        user?: AuthUser;
-        message?: string;
-      };
-      if (!response.ok || !data.ok || !data.token || !data.user) {
-        throw new Error(data.message ?? "Unable to verify email.");
-      }
-      localStorage.setItem(STORAGE_KEYS.authToken, data.token);
-      localStorage.setItem(STORAGE_KEYS.authUser, JSON.stringify(data.user));
-      setCurrentUser(data.user);
-      setVerificationEmail("");
-      setVerificationCode("");
-      setVerificationInfo("");
-      setToastMessage("Email verified successfully.");
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "Unable to verify email.");
-    } finally {
-      setVerificationSubmitting(false);
-    }
-  };
-
-  const requestVerificationCode = async (email: string, source: "manual" | "post_reset" = "manual") => {
-    if (!AUTH_API_BASE_URL) {
-      throw new Error("Set VITE_AUTH_API_BASE_URL to resend verification.");
-    }
-    if (!EMAIL_REGEX.test(email.trim())) {
-      throw new Error("Enter a valid email first.");
-    }
-
-    const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/resend-verification`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email: email.trim() }),
-    });
-    const data = (await response.json()) as { ok?: boolean; message?: string; verificationCode?: string };
-    if (!response.ok || !data.ok) {
-      throw new Error(data.message ?? "Unable to resend verification code.");
-    }
-
-    if (data.verificationCode) {
-      setVerificationCode(data.verificationCode);
-    }
-
-    if (source === "post_reset") {
-      setVerificationInfo(
-        data.verificationCode
-          ? "Password updated. Verification code sent and auto-filled for testing. Verify now, then sign in with your new password."
-          : "Password updated. Email not verified yet. Verification code sent now. Check inbox/spam, verify, then sign in with your new password.",
-      );
-      return;
-    }
-
-    setVerificationInfo(data.verificationCode ? "Verification code refreshed and auto-filled for testing." : "Verification email sent. Check inbox/spam.");
-  };
-
-  const handleResendVerification = async () => {
-    setAuthError("");
-    setVerificationSubmitting(true);
-    try {
-      await requestVerificationCode(verificationEmail, "manual");
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "Unable to resend verification code.");
-    } finally {
-      setVerificationSubmitting(false);
-    }
-  };
+ 
 
   const exportCsv = () => {
     const headers = [
@@ -2304,37 +2439,6 @@ localStorage.setItem(snapshotKey, JSON.stringify(monthlyTotal));
     a.click();
     URL.revokeObjectURL(href);
     setToastMessage("Report downloaded.");
-  };
-  
-  const handleLogoutAllDevices = async () => {
-    if (!AUTH_API_BASE_URL) {
-      setAuthError("Set VITE_AUTH_API_BASE_URL to manage sessions.");
-      return;
-    }
-    const token = localStorage.getItem(STORAGE_KEYS.authToken) ?? "";
-    if (!token) {
-      return;
-    }
-    try {
-      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/logout-all-devices`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      const data = (await response.json()) as { ok?: boolean; message?: string };
-      if (!response.ok || !data.ok) {
-        throw new Error(data.message ?? "Unable to logout all devices.");
-      }
-      handleLogout();
-      pushNotificationCenter({
-        title: "Session security",
-        detail: "You were logged out from all devices.",
-        type: "security",
-      });
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "Unable to logout all devices.");
-    }
   };
 
   const handleDeleteAccount = async () => {
@@ -2482,7 +2586,458 @@ const smartTips = useMemo(() => {
     return tips;
   }, [monthlyIncome, savingsRate, balance, withDue, categoryLimitStatus, totalLateFees, inactiveSubscriptions, budgetProgress, items, last6MonthsTotals, savingsGoals, monthlyTotal, formatMoney]);
 
+const handleAuthSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAuthError("");
 
+    if (!AUTH_API_BASE_URL) {
+      setAuthError("Set VITE_AUTH_API_BASE_URL to enable login/signup.");
+      return;
+    }
+
+    const countrySelection = PHONE_COUNTRIES.find((country) => country.code === selectedPhoneCountry) ?? PHONE_COUNTRIES[0];
+    const normalizedPhone = toInternationalPhone(countrySelection.dial, phoneLocalNumber);
+
+    if (authMode === "signup") {
+      if (!authForm.fullName.trim() || !authForm.username.trim() || !authForm.email.trim() || !phoneLocalNumber.trim()) {
+        setAuthError("Please fill all signup fields.");
+        return;
+      }
+
+      if (!EMAIL_REGEX.test(authForm.email.trim())) {
+        setAuthError("Email is invalid. Please enter a valid email address.");
+        return;
+      }
+
+      if (containsBlockedUsernameWord(authForm.username.trim(), blockedUsernameWords, allowedUsernames)) {
+        setAuthError("Username contains blocked words. Please choose a different username.");
+        return;
+      }
+
+      if (!/^\+\d{8,15}$/.test(normalizedPhone)) {
+        setAuthError("Enter a valid phone number for the selected country.");
+        return;
+      }
+    }
+
+    if (!authForm.password || authForm.password.length < 8) {
+      setAuthError("Password must be at least 8 characters.");
+      return;
+    }
+
+    setAuthSubmitting(true);
+    try {
+      const endpoint = authMode === "signup" ? "/api/auth/signup" : "/api/auth/login";
+      const payload =
+        authMode === "signup"
+                    ? {
+              fullName: authForm.fullName.trim(),
+              phoneNumber: normalizedPhone,
+              username: authForm.username.trim(),
+              email: authForm.email.trim(),
+              password: authForm.password,
+              country: selectedPhoneCountry,
+            }
+          : {
+              username: authForm.username.trim(),
+              password: authForm.password,
+            };
+
+      const response = await fetch(`${AUTH_API_BASE_URL}${endpoint}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = (await response.json()) as {
+        ok?: boolean;
+        token?: string;
+        user?: AuthUser;
+        code?: string;
+        message?: string;
+        requiresEmailVerification?: boolean;
+        verificationEmail?: string;
+        verificationCode?: string;
+        expiresInHours?: number;
+        retryAfterSeconds?: number;
+      };
+
+      if (!response.ok || !data.ok) {
+        if (data.code === "BLOCKED_USERNAME") {
+          throw new Error("Username contains blocked words. Please choose a different username.");
+        }
+        if (data.code === "INVALID_EMAIL") {
+          throw new Error("Email is invalid. Please enter a valid email address.");
+        }
+        if (data.code === "EMAIL_NOT_VERIFIED") {
+          setVerificationEmail(data.verificationEmail?.trim() || authForm.email.trim());
+          setVerificationInfo("Email not verified. Verify your email, then sign in again with your latest password.");
+          throw new Error(data.message ?? "Email not verified. Verify your email to continue.");
+        }
+        if (data.code === "LOGIN_LOCKED") {
+          throw new Error(data.message ?? `Too many failed attempts. Try again in ${data.retryAfterSeconds ?? 0}s.`);
+        }
+        throw new Error(data.code ?? "Authentication failed");
+      }
+
+      if (authMode === "signup") {
+        setVerificationEmail(authForm.email.trim());
+        setVerificationCode(data.verificationCode ?? "");
+        setVerificationInfo(
+          data.verificationCode
+            ? "Verification code generated. It has been auto-filled for testing."
+            : `Verification code sent to ${authForm.email.trim()}. Check inbox/spam and enter it below.`,
+        );
+        setAuthMode("login");
+        setAuthError("");
+                setUserCountry(selectedPhoneCountry);
+        localStorage.setItem("bill-tracker-user-country", JSON.stringify(selectedPhoneCountry));
+        setToastMessage("Account created. Verify your email to continue.");
+      } else if (data.token && data.user) {
+        localStorage.setItem(STORAGE_KEYS.authToken, data.token);
+        localStorage.setItem(STORAGE_KEYS.authUser, JSON.stringify(data.user));
+                setCurrentUser(data.user);
+        const country = data.user.country || selectedPhoneCountry;
+        setUserCountry(country);
+        localStorage.setItem("bill-tracker-user-country", JSON.stringify(country));
+        setToastMessage("Welcome back.");
+      } else {
+        throw new Error("Authentication response missing token.");
+      }
+
+      setAuthForm({
+        fullName: "",
+        username: "",
+        email: "",
+        phoneNumber: "+212",
+        password: "",
+      });
+      setSelectedPhoneCountry("MA");
+      setPhoneLocalNumber("");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Authentication failed");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+
+
+  const requestVerificationCode = async (email: string, source: "manual" | "post_reset" = "manual") => {
+
+  const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAuthError("");
+    if (!AUTH_API_BASE_URL) {
+      setAuthError("Set VITE_AUTH_API_BASE_URL to verify email.");
+      return;
+    }
+    if (!EMAIL_REGEX.test(verificationEmail.trim())) {
+      setAuthError("Enter a valid verification email.");
+      return;
+    }
+    if (verificationCode.trim().length < 8) {
+      setAuthError("Enter a valid verification code.");
+      return;
+    }
+
+    setVerificationSubmitting(true);
+    try {
+      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/verify-email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: verificationEmail.trim(),
+          verificationCode: verificationCode.trim(),
+        }),
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        token?: string;
+        user?: AuthUser;
+        message?: string;
+      };
+      if (!response.ok || !data.ok || !data.token || !data.user) {
+        throw new Error(data.message ?? "Unable to verify email.");
+      }
+      localStorage.setItem(STORAGE_KEYS.authToken, data.token);
+      localStorage.setItem(STORAGE_KEYS.authUser, JSON.stringify(data.user));
+      setCurrentUser(data.user);
+      setVerificationEmail("");
+      setVerificationCode("");
+      setVerificationInfo("");
+      setToastMessage("Email verified successfully.");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to verify email.");
+    } finally {
+      setVerificationSubmitting(false);
+    }
+  };
+
+  
+    if (!AUTH_API_BASE_URL) {
+      throw new Error("Set VITE_AUTH_API_BASE_URL to resend verification.");
+    }
+    if (!EMAIL_REGEX.test(email.trim())) {
+      throw new Error("Enter a valid email first.");
+    }
+
+    const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/resend-verification`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email: email.trim() }),
+    });
+    const data = (await response.json()) as { ok?: boolean; message?: string; verificationCode?: string };
+    if (!response.ok || !data.ok) {
+      throw new Error(data.message ?? "Unable to resend verification code.");
+    }
+
+    if (data.verificationCode) {
+      setVerificationCode(data.verificationCode);
+    }
+
+    if (source === "post_reset") {
+      setVerificationInfo(
+        data.verificationCode
+          ? "Password updated. Verification code sent and auto-filled for testing. Verify now, then sign in with your new password."
+          : "Password updated. Email not verified yet. Verification code sent now. Check inbox/spam, verify, then sign in with your new password.",
+      );
+      return;
+    }
+
+    setVerificationInfo(data.verificationCode ? "Verification code refreshed and auto-filled for testing." : "Verification email sent. Check inbox/spam.");
+  };
+
+
+  const handleForgotPasswordRequest = async (isResend = false) => {
+    setAuthError("");
+    setForgotPasswordInfo("");
+
+    if (isResend && forgotPasswordResendAvailableAt > Date.now()) {
+      return;
+    }
+
+    if (!AUTH_API_BASE_URL) {
+      setAuthError("Set VITE_AUTH_API_BASE_URL to enable password reset.");
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(forgotPasswordEmail.trim())) {
+      setAuthError("Enter a valid email before requesting a reset code.");
+      return;
+    }
+
+    setForgotPasswordSubmitting(true);
+    try {
+      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/forgot-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: forgotPasswordEmail.trim() }),
+      });
+
+      const data = (await response.json()) as {
+        ok?: boolean;
+        message?: string;
+        resetToken?: string;
+        resetCode?: string;
+        expiresInMinutes?: number;
+      };
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message ?? "Unable to request password reset.");
+      }
+
+      const debugToken = data.resetCode ?? data.resetToken;
+      if (debugToken) {
+        setForgotPasswordToken(debugToken);
+      }
+      setForgotPasswordStep("reset");
+      setForgotPasswordExpiresInMinutes(typeof data.expiresInMinutes === "number" ? data.expiresInMinutes : null);
+      setForgotPasswordResendAvailableAt(Date.now() + 60 * 1000);
+      setForgotPasswordNow(Date.now());
+
+      if (debugToken) {
+        setForgotPasswordInfo(
+          "Reset code generated. It has been auto-filled for testing. Set a new password below.",
+        );
+      } else {
+        setForgotPasswordInfo(
+          `Reset code sent to ${forgotPasswordEmail.trim()}. Check inbox and spam, then enter the code below.`,
+        );
+      }
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to request password reset.");
+    } finally {
+      setForgotPasswordSubmitting(false);
+    }
+  };
+
+
+  const handleForgotPasswordReset = async () => {
+    setAuthError("");
+    setForgotPasswordInfo("");
+
+    if (!AUTH_API_BASE_URL) {
+      setAuthError("Set VITE_AUTH_API_BASE_URL to enable password reset.");
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(forgotPasswordEmail.trim())) {
+      setAuthError("Enter the same valid email used during signup.");
+      return;
+    }
+
+    if (!forgotPasswordToken.trim() || forgotPasswordToken.trim().length < 8) {
+      setAuthError("Enter a valid reset code.");
+      return;
+    }
+
+    if (forgotPasswordNewPassword.length < 8) {
+      setAuthError("New password must be at least 8 characters.");
+      return;
+    }
+
+    setForgotPasswordSubmitting(true);
+    try {
+      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/reset-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: forgotPasswordEmail.trim(),
+          resetToken: forgotPasswordToken.trim(),
+          newPassword: forgotPasswordNewPassword,
+        }),
+      });
+
+      const data = (await response.json()) as {
+        ok?: boolean;
+        code?: string;
+        message?: string;
+      };
+
+      if (!response.ok || !data.ok) {
+        if (data.code === "INVALID_RESET_TOKEN") {
+          throw new Error("Reset code is invalid or expired.");
+        }
+        throw new Error(data.message ?? "Unable to reset password.");
+      }
+
+      // Force logout after password reset so old sessions cannot create confusion.
+      localStorage.removeItem(STORAGE_KEYS.authToken);
+      localStorage.removeItem(STORAGE_KEYS.authUser);
+      setCurrentUser(null);
+      setLocked(false);
+      setPinInput("");
+      setShowPremiumPanel(false);
+
+      const targetEmail = forgotPasswordEmail.trim();
+
+      setForgotPasswordInfo("Password updated. Verify your email before signing in.");
+      setForgotPasswordOpen(false);
+      setForgotPasswordStep("request");
+      setForgotPasswordToken("");
+      setForgotPasswordNewPassword("");
+      setForgotPasswordResendAvailableAt(0);
+      setForgotPasswordExpiresInMinutes(null);
+      setAuthMode("login");
+      setVerificationEmail(targetEmail);
+      setVerificationCode("");
+      setVerificationInfo("Password updated. Email not verified yet. Tap \"Send verification code now\" below.");
+      setAuthForm((prev) => ({ ...prev, password: "" }));
+      setToastMessage("Password updated. Verify your email to sign in.");
+
+      setVerificationSubmitting(true);
+      try {
+        await requestVerificationCode(targetEmail, "post_reset");
+      } catch (verificationError) {
+        setAuthError(
+          verificationError instanceof Error
+            ? verificationError.message
+            : "Password updated, but verification email could not be sent.",
+        );
+      } finally {
+        setVerificationSubmitting(false);
+      }
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to reset password.");
+    } finally {
+      setForgotPasswordSubmitting(false);
+    }
+  };
+
+ const handleResendVerification = async () => {
+    setAuthError("");
+    setVerificationSubmitting(true);
+    try {
+      await requestVerificationCode(verificationEmail, "manual");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to resend verification code.");
+    } finally {
+      setVerificationSubmitting(false);
+    }
+  };
+
+const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAuthError("");
+    if (!AUTH_API_BASE_URL) {
+      setAuthError("Set VITE_AUTH_API_BASE_URL to verify email.");
+      return;
+    }
+    if (!EMAIL_REGEX.test(verificationEmail.trim())) {
+      setAuthError("Enter a valid verification email.");
+      return;
+    }
+    if (verificationCode.trim().length < 8) {
+      setAuthError("Enter a valid verification code.");
+      return;
+    }
+
+    setVerificationSubmitting(true);
+    try {
+      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/verify-email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: verificationEmail.trim(),
+          verificationCode: verificationCode.trim(),
+        }),
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        token?: string;
+        user?: AuthUser;
+        message?: string;
+      };
+      if (!response.ok || !data.ok || !data.token || !data.user) {
+        throw new Error(data.message ?? "Unable to verify email.");
+      }
+      localStorage.setItem(STORAGE_KEYS.authToken, data.token);
+      localStorage.setItem(STORAGE_KEYS.authUser, JSON.stringify(data.user));
+      setCurrentUser(data.user);
+      setVerificationEmail("");
+      setVerificationCode("");
+      setVerificationInfo("");
+      setToastMessage("Email verified successfully.");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to verify email.");
+    } finally {
+      setVerificationSubmitting(false);
+    }
+  };
+  
   if (showWelcomeSplash) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-white">
@@ -2564,6 +3119,23 @@ const smartTips = useMemo(() => {
                   placeholder="Email"
                   className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
                 />
+                <select
+                  value={selectedPhoneCountry}
+                  onChange={(e) => setSelectedPhoneCountry(e.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+                >
+                  <option value="" disabled>Select your country</option>
+                  {PHONE_COUNTRIES_BY_REGION.map((group) => (
+                    <optgroup key={group.region} label={group.region}>
+                      {group.countries.map((country) => (
+                        <option key={country.code} value={country.code}>
+                          {countryFlag(country.code)} {country.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+
                 <div className="grid grid-cols-3 gap-2">
                   <select
                     value={selectedPhoneCountry}
@@ -2868,7 +3440,9 @@ const smartTips = useMemo(() => {
             <img src="/images/tracker-logo.png" alt="All-in-One Bill Tracker logo" className="h-10 w-10 rounded-xl" />
             <div>
               <h1 className="text-xl font-semibold">All-in-One Bill Tracker</h1>
-              <p className="text-xs text-cyan-300">Hello {currentUser.username}</p>
+                           <p className="text-xs text-cyan-300">
+                {userCountry ? `${countryFlag(userCountry)} ` : ""}Hello {currentUser.username}
+              </p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -2900,28 +3474,84 @@ const smartTips = useMemo(() => {
               <option value="DZD">🇩🇿 DZD</option>
               <option value="MAD">🇲🇦 MAD</option>
             </select>
+          
             <button
-              onClick={() => {
-                setTheme((prev) => prev === "dark" ? "light" : "dark");
-                setToastMessage(theme === "dark" ? "Light mode activated" : "Dark mode activated");
-              }}
-              className="rounded-lg border border-slate-600 px-3 py-2 text-sm hover:bg-slate-800"
+              onClick={() => { setShowNotifications((prev) => !prev); if (!showNotifications) markAllNotificationsRead(); }}
+              className="relative rounded-lg border border-slate-600 px-3 py-2 text-sm hover:bg-slate-800"
             >
-              {theme === "dark" ? "☀️" : "🌙"}
+              🔔
+              {unreadNotificationCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">{unreadNotificationCount > 9 ? "9+" : unreadNotificationCount}</span>
+              )}
             </button>
+
             {pin && (
               <button onClick={() => setLocked(true)} className="rounded-lg border border-slate-600 px-3 py-2 text-sm">
                 🔒
               </button>
             )}
-            {canUsePremiumFeatures && (
+            {canUsePremiumFeatures ? (
   <span className="rounded-lg bg-amber-400/20 border border-amber-400/50 px-2 py-1 text-xs font-bold text-amber-300">💎 Premium</span>
+) : (
+  <span className="rounded-lg bg-slate-500/20 border border-slate-500/50 px-2 py-1 text-xs font-bold text-slate-300">🆓 Free</span>
 )}
-<button onClick={handleLogout} className="rounded-lg border border-red-500 px-3 py-2 text-sm text-red-300">
-  Log out
-</button>
+<button onClick={() => setShowLicenseModal(true)} className="rounded-lg border border-amber-500 px-3 py-2 text-sm text-amber-300 hover:bg-amber-500/10">🔑</button>
+
+
           </div>
         </header>
+
+                {showNotifications && (
+          <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-semibold flex items-center">
+  🔔 Notification Center
+  <InfoModal title="Notification Center">
+    <p>All your <strong>app notifications</strong> in one place.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li>🔵 <strong>Reminder</strong> — Payment reminders</li>
+      <li>🟢 <strong>Security</strong> — Account security alerts</li>
+      <li>🟡 <strong>Insight</strong> — Smart financial insights</li>
+      <li>⚫ <strong>System</strong> — App updates and changes</li>
+      <li>🏆 <strong>Achievement</strong> — Unlocked badges</li>
+    </ul>
+    <p className="mt-2 text-amber-300">💡 Click the bell icon 🔔 in the header to open/close.</p>
+  </InfoModal>
+</h2>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">{notificationCenter.length} notification{notificationCenter.length !== 1 ? "s" : ""}</span>
+                {notificationCenter.length > 0 && (
+                  <button onClick={clearNotifications} className="rounded-lg border border-red-500 px-2 py-1 text-xs text-red-300 hover:bg-red-500/20">Clear all</button>
+                )}
+                <button onClick={() => setShowNotifications(false)} className="rounded-lg border border-slate-700 px-2 py-1 text-xs hover:bg-slate-800">✕ Close</button>
+              </div>
+            </div>
+
+            {notificationCenter.length === 0 ? (
+              <div className="py-6 text-center">
+                <p className="text-3xl">🔔</p>
+                <p className="mt-2 text-sm text-slate-400">No notifications yet.</p>
+                <p className="text-xs text-slate-500 mt-1">You'll see payment reminders, insights, and achievements here.</p>
+              </div>
+            ) : (
+              <div className="max-h-80 space-y-2 overflow-y-auto">
+                {notificationCenter.map((notif) => (
+                  <div key={notif.id} className={`rounded-lg border p-3 ${notif.read ? "border-slate-800 bg-slate-950/50" : "border-slate-700 bg-slate-950"}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium">
+                          {notif.type === "reminder" ? "🔵" : notif.type === "security" ? "🟢" : notif.type === "insight" ? "🟡" : notif.type === "achievement" ? "🏆" : "⚫"} {notif.title}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-0.5">{notif.detail}</p>
+                      </div>
+                      <span className="shrink-0 text-[10px] text-slate-500">{new Date(notif.createdAt).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         <p className="mb-4 text-xs text-slate-400">
           FX rates: {fxState === "live" ? "Live" : fxState === "fallback" ? "Fallback" : "Refreshing"}
@@ -2929,7 +3559,7 @@ const smartTips = useMemo(() => {
           <button type="button" onClick={() => void refreshExchangeRates()} className="ml-2 text-cyan-300">Refresh</button>
         </p>
 
-{showPremiumPanel && (
+{showPremiumPanel && !IS_PLAYSTORE && (
   <section className="mb-6 rounded-xl border border-amber-500/40 bg-slate-900 p-4">
     <h2 className="text-lg font-semibold text-amber-300">💎 Upgrade to Premium</h2>
     <p className="mt-2 text-sm text-slate-300">
@@ -2961,7 +3591,7 @@ const smartTips = useMemo(() => {
         </ul>
         <button
           type="button"
-          onClick={() => window.open("https://app4clients.gumroad.com/l/vhabmx", "_blank")}
+          onClick={() => window.open("https://app4clients.gumroad.com/l/mazfe", "_blank")}
           className="mt-3 w-full rounded-lg bg-amber-400 px-3 py-2.5 text-sm font-bold text-slate-950 hover:bg-amber-300 active:scale-95 transition-all"
         >
           Subscribe Now →
@@ -2982,7 +3612,7 @@ const smartTips = useMemo(() => {
         </ul>
         <button
           type="button"
-          onClick={() => window.open("https://app4clients.gumroad.com/l/vhabmx", "_blank")}
+          onClick={() => window.open("https://app4clients.gumroad.com/l/mazfe", "_blank")}
           className="mt-3 w-full rounded-lg bg-amber-400 px-3 py-2.5 text-sm font-bold text-slate-950 hover:bg-amber-300 active:scale-95 transition-all"
         >
           Subscribe Now →
@@ -3001,12 +3631,42 @@ const smartTips = useMemo(() => {
       <p className="mt-2 text-[11px] text-amber-300">⚠️ Use the same email address you signed up with in this app.</p>
     </div>
 
-    <div className="mt-3 flex flex-wrap gap-2">
-      <button onClick={() => void refreshEntitlement()} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300">🔄 Check Premium Status</button>
-      <button onClick={() => setShowPremiumPanel(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Close</button>
-    </div>
-  </section>
-)}
+                {/* License Activation */}
+            <div className="mt-4 rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-4">
+              <h3 className="text-sm font-semibold text-cyan-300">🔑 Activate License Key</h3>
+              <p className="mt-1 text-xs text-slate-400">Enter the email and license key from your Gumroad receipt.</p>
+              <div className="mt-3 space-y-2">
+                <input
+                  type="email"
+                  value={licenseEmail}
+                  onChange={(e) => setLicenseEmail(e.target.value)}
+                  placeholder="Email used for purchase"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+                />
+                <input
+                  type="text"
+                  value={licenseKey}
+                  onChange={(e) => setLicenseKey(e.target.value)}
+                  placeholder="License key (e.g. ABCD-1234-EFGH-5678)"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+                />
+                {licenseError && <p className="text-xs text-red-400">{licenseError}</p>}
+                <button
+                  onClick={() => void verifyLicense()}
+                  disabled={licenseActivating}
+                  className="w-full rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950 disabled:opacity-60"
+                >
+                  {licenseActivating ? "Activating..." : "Activate License"}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button onClick={() => void refreshEntitlement()} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300">🔄 Check Premium Status</button>
+              <button onClick={() => setShowPremiumPanel(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Close</button>
+            </div>
+          </section>
+        )}
 
         {subscriptionExpired && (
           <section className="mb-4 rounded-xl border border-red-500/50 bg-red-950/30 p-4">
@@ -3022,6 +3682,38 @@ const smartTips = useMemo(() => {
         {activeTab === "dashboard" && (
           <>
             {/* 4 Stats Cards */}
+                        {/* Payment Streak */}
+            {paymentStreak > 0 && (
+              <section className="mb-6 rounded-xl border border-orange-500/30 bg-gradient-to-r from-orange-500/10 to-red-500/10 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-slate-400">Payment Streak</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-3xl">🔥</p>
+                      <div>
+                        <p className="text-2xl font-bold text-orange-300">{paymentStreak} month{paymentStreak !== 1 ? "s" : ""}</p>
+                        <p className="text-xs text-slate-400">Best: {bestStreak} months</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    {paymentStreak >= 12 ? (
+                      <p className="text-3xl">👑</p>
+                    ) : paymentStreak >= 6 ? (
+                      <p className="text-3xl">🏆</p>
+                    ) : paymentStreak >= 3 ? (
+                      <p className="text-3xl">⭐</p>
+                    ) : (
+                      <p className="text-3xl">💪</p>
+                    )}
+                    <p className="text-xs text-slate-400">
+                      {paymentStreak >= 12 ? "Legendary!" : paymentStreak >= 6 ? "Incredible!" : paymentStreak >= 3 ? "Great job!" : "Keep going!"}
+                    </p>
+                  </div>
+                </div>
+              </section>
+            )}
+
             <section className="mb-6 grid gap-3 sm:grid-cols-4">
               <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-400">Monthly income</p>
@@ -3038,11 +3730,16 @@ const smartTips = useMemo(() => {
                 </p>
                 {monthlyIncome > 0 && <p className="mt-1 text-xs text-slate-400">{savingsRate}% savings rate</p>}
               </div>
-              <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+                            <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-400">Upcoming in 7 days</p>
                 <p className="text-2xl font-semibold text-amber-300">
                   {withDue.filter((item) => !item.paid && item.daysUntil >= 0 && item.daysUntil <= 7).length}
                 </p>
+                <div className="mt-2 flex gap-2">
+                  <span className="text-xs text-red-400">🔴 {items.filter((i) => i.priority === "high" && !isPaidThisMonth(i)).length}</span>
+                  <span className="text-xs text-amber-400">🟡 {items.filter((i) => i.priority === "medium" && !isPaidThisMonth(i)).length}</span>
+                  <span className="text-xs text-emerald-400">🟢 {items.filter((i) => i.priority === "low" && !isPaidThisMonth(i)).length}</span>
+                </div>
               </div>
             </section>
 
@@ -3070,13 +3767,6 @@ const smartTips = useMemo(() => {
                 >
                   <span className="text-xl">✅</span>
                   <span className="font-medium">Mark All Paid</span>
-                </button>
-                <button
-                  onClick={exportBackup}
-                  className="flex flex-col items-center gap-1 rounded-xl border border-violet-500/30 bg-violet-500/10 p-3 text-sm text-violet-300 transition-all hover:bg-violet-500/20 active:scale-95"
-                >
-                  <span className="text-xl">💾</span>
-                  <span className="font-medium">Export Backup</span>
                 </button>
                 <button
                   onClick={() => void refreshExchangeRates()}
@@ -3201,6 +3891,379 @@ const smartTips = useMemo(() => {
               )}
             </section>
 
+            {/* Next Payment Countdown */}
+            {nextPaymentCountdown && (
+              <section className="mb-6 rounded-xl border border-cyan-500/30 bg-gradient-to-r from-cyan-500/10 to-violet-500/10 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-slate-400">Next Payment</p>
+                    <p className="text-lg font-semibold text-cyan-300">{nextPaymentCountdown.name}</p>
+                    <p className="text-sm text-slate-400">{formatMoney(nextPaymentCountdown.amount)}</p>
+                  </div>
+                  <div className="text-right">
+                    {nextPaymentCountdown.isToday ? (
+                      <div className="text-center">
+                        <p className="text-4xl">🔴</p>
+                        <p className="text-sm font-bold text-red-400 animate-pulse">DUE TODAY!</p>
+                      </div>
+                    ) : nextPaymentCountdown.isTomorrow ? (
+                      <div className="text-center">
+                        <p className="text-4xl">⚡</p>
+                        <p className="text-sm font-bold text-amber-400">Tomorrow!</p>
+                      </div>
+                    ) : (
+                      <div className="text-center">
+                        <p className="text-4xl font-bold text-cyan-300">{nextPaymentCountdown.daysLeft}</p>
+                        <p className="text-xs text-slate-400">days left</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
+        
+          </>
+        )}
+
+        {/* ===== TAB: BILLS ===== */}
+        {activeTab === "bills" && (
+          <>
+            {/* Smart Add Form */}
+            <section className="mb-6">
+              <form onSubmit={onAddItem} className="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-4">
+                <h2 className="text-lg font-semibold flex items-center">
+  {editingItemId ? "Edit item" : "Smart Add"}
+  <InfoModal title="Smart Add">
+    <p>Add or edit a <strong>bill or subscription</strong> quickly.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li><strong>Name</strong> — Bill name</li>
+      <li><strong>Amount</strong> — Amount in your currency</li>
+      <li><strong>Due Day</strong> — Day of month (1-31)</li>
+      <li><strong>Category</strong> — Custom category</li>
+      <li><strong>Type</strong> — Bill or Subscription</li>
+      <li><strong>Reminder</strong> — Remind X days before (0-20)</li>
+    </ul>
+    <p className="mt-2 text-cyan-300">💡 Click a template above to auto-fill!</p>
+  </InfoModal>
+</h2>
+                <div className="flex flex-wrap gap-2">
+                  {templates.map((template) => (
+                    <button key={template.name} type="button" onClick={() => applyTemplate(template)} className="rounded-full border border-slate-700 px-3 py-1 text-sm text-slate-200">{template.name}</button>
+                  ))}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Name" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+                  <div className="space-y-2">
+                    <input type="number" min={0} step="0.01" value={form.amount > 0 ? Number(fromUSD(form.amount, currency, currencyToUSD).toFixed(2)) : ""} onChange={(e) => setForm((prev) => ({ ...prev, amount: toUSD(Number(e.target.value || 0), currency, currencyToUSD) }))} placeholder={`Amount (${currency})`} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+                    <div className="flex flex-wrap gap-1">
+                      {[50, 100, 200, 300, 500, 1000].map((preset) => (
+                        <button key={preset} type="button" onClick={() => setForm((prev) => ({ ...prev, amount: toUSD(preset, currency, currencyToUSD) }))} className="rounded-md border border-slate-700 px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800">{preset}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <input type="number" min={1} max={31} value={form.dueDay > 0 ? form.dueDay : ""} onChange={(e) => setForm((prev) => ({ ...prev, dueDay: Number(e.target.value || 0) }))} placeholder="Due day" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+
+                  <input value={form.category} onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))} placeholder="Category" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+
+                                    <input value={form.note || ""} onChange={(e) => setForm((prev) => ({ ...prev, note: e.target.value }))} placeholder="Note / Receipt # (optional)" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+
+                  <select value={form.repeat} onChange={(e) => setForm((prev) => ({ ...prev, repeat: e.target.value as RecurrenceType }))} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
+                    <option value="weekly">Weekly</option>
+                    <option value="biweekly">Bi-weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="quarterly">Quarterly</option>
+                    <option value="yearly">Yearly</option>
+                  </select>
+
+                  
+                  <select value={form.type} onChange={(e) => setForm((prev) => ({ ...prev, type: e.target.value as ItemType }))} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
+                    <option value="bill">Bill</option>
+                    <option value="subscription">Subscription</option>
+                  </select>
+
+                                    <select value={form.priority} onChange={(e) => setForm((prev) => ({ ...prev, priority: e.target.value as PriorityLevel }))} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
+                    <option value="high">🔴 High Priority</option>
+                    <option value="medium">🟡 Medium</option>
+                    <option value="low">🟢 Low</option>
+                  </select>
+
+                  <input type="number" min={0} max={20} value={form.reminderDays >= 0 ? form.reminderDays : ""} onChange={(e) => setForm((prev) => ({ ...prev, reminderDays: e.target.value === "" ? -1 : Number(e.target.value) }))} placeholder="Reminder days" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="submit" className="rounded-lg bg-cyan-500 px-4 py-2 font-semibold text-slate-950">{editingItemId ? "Save changes" : "Add item"}</button>
+                  <button type="button" onClick={saveTemplate} className="rounded-lg border border-slate-600 px-4 py-2">Save as template</button>
+                  {editingItemId && <button type="button" onClick={resetForm} className="rounded-lg border border-slate-600 px-4 py-2">Cancel edit</button>}
+                </div>
+              </form>
+            </section>
+
+            {/* Search & Filter */}
+            <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+              <h2 className="mb-3 text-lg font-semibold flex items-center">
+  Search & Filter
+  <InfoModal title="Search & Filter">
+    <p>Filter your bills to find what you need:</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li><strong>Search</strong> — Search by bill name</li>
+      <li><strong>Status</strong> — All / Due soon / Paid / Unpaid</li>
+      <li><strong>Category</strong> — Filter by category</li>
+      <li><strong>Reset</strong> — Clear all filters</li>
+    </ul>
+  </InfoModal>
+</h2>
+                            <div className="grid gap-3 sm:grid-cols-5">
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
+                  <option value="all">All</option>
+                  <option value="dueSoon">Due soon</option>
+                  <option value="paid">Paid</option>
+                  <option value="unpaid">Unpaid</option>
+                </select>
+                <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
+                  <option value="all">All categories</option>
+                  {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+                </select>
+
+                                <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
+                  <option value="all">All priorities</option>
+                  <option value="high">🔴 High</option>
+                  <option value="medium">🟡 Medium</option>
+                  <option value="low">🟢 Low</option>
+                </select>
+                <button onClick={() => { setSearch(""); setStatusFilter("all"); setCategoryFilter("all"); setPriorityFilter("all"); }} className="rounded-lg border border-slate-700 px-3 py-2">Reset</button>
+              </div>
+            </section>
+
+            {/* Bills List */}
+            <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-lg font-semibold flex items-center">
+  Bills & Subscriptions
+  <InfoModal title="Bills & Subscriptions">
+    <p>Your full list of bills with status and actions:</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li><strong className="text-cyan-300">Quick edit</strong> — Change amount & due day</li>
+      <li><strong className="text-cyan-300">Edit</strong> — Full edit form</li>
+      <li><strong className="text-emerald-300">✓ Mark paid</strong> — Paid this month</li>
+      <li><strong className="text-red-300">Delete</strong> — Remove permanently</li>
+    </ul>
+  </InfoModal>
+</h2>
+                {filtered.some((item) => !item.paid) && (
+                  <button onClick={() => { filtered.filter((item) => !item.paid).forEach((item) => markPaid(item.id)); setToastMessage("All visible items marked as paid."); }} className="rounded-lg border border-emerald-600 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 active:scale-95 transition-transform">✓ Mark all visible as paid</button>
+                )}
+              </div>
+              <div className="space-y-3">
+                {filtered.map((item) => (
+                  <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3">
+                    <div>
+                      <p className="font-medium">{item.type === "bill" ? "💡 " : "🔄 "}{item.name} <span className={`text-xs ${item.priority === "high" ? "text-red-400" : item.priority === "low" ? "text-emerald-400" : "text-amber-400"}`}>{item.priority === "high" ? "🔴" : item.priority === "low" ? "🟢" : "🟡"}</span></p>
+                      {inlineEditId === item.id ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                          <input type="number" min={0} step="0.01" value={inlineDraft.amount} onChange={(e) => setInlineDraft((prev) => ({ ...prev, amount: e.target.value }))} className="w-28 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1" />
+                          <input type="number" min={1} max={31} value={inlineDraft.dueDay} onChange={(e) => setInlineDraft((prev) => ({ ...prev, dueDay: e.target.value }))} className="w-24 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1" />
+                          <span className="text-slate-400">{item.category}</span>
+                        </div>
+                                            ) : (
+                        <>
+                          <p className="text-sm text-slate-400">{formatMoney(item.amount)} · due day {item.dueDay} · {item.category} · {getRecurrenceLabel(item.repeat)}</p>
+                          {item.note && <p className="text-xs text-slate-500 mt-0.5">📝 {item.note}</p>}
+                        </>
+                      )}
+                      <div className="flex items-center gap-3">
+                        <p className={`text-xs ${item.paid ? "text-emerald-400" : item.daysUntil <= 2 ? "text-red-400" : "text-slate-400"}`}>{item.paid ? "✓ Paid this month" : `Due in ${item.daysUntil} day(s)`}</p>
+                        {item.lastPaidAt && <p className="text-xs text-slate-500">Last paid: {new Date(item.lastPaidAt).toLocaleDateString()}</p>}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      {inlineEditId === item.id ? (
+                        <>
+                          <button onClick={() => saveInlineEdit(item.id)} className="rounded-lg bg-cyan-500 px-3 py-2 text-sm font-medium text-slate-950">Save</button>
+                          <button onClick={cancelInlineEdit} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Cancel</button>
+                        </>
+                      ) : (
+                        <>
+                          <button onClick={() => startInlineEdit(item.id)} className="rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-300">Quick edit</button>
+                          <button onClick={() => startEditItem(item.id)} className="rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-300">Edit</button>
+                        </>
+                      )}
+                      {!item.paid && <button onClick={() => markPaid(item.id)} className="rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 active:scale-95 transition-transform">✓ Mark paid</button>}
+                      <button onClick={() => setDeleteConfirmItem(item)} className="rounded-lg border border-red-700 px-3 py-2 text-sm text-red-300 hover:bg-red-500/20 active:scale-95 transition-transform">Delete</button>
+                    </div>
+                  </div>
+                ))}
+                {filtered.length === 0 && (
+                  <div className="py-8 text-center">
+                    <p className="text-4xl">📋</p>
+                    <div className="mt-3 space-y-2">
+                      <p className="text-sm text-slate-400">{items.length === 0 ? "No bills yet. Use Smart Add above to add your first bill, or tap a template to get started!" : "No items match this filter."}</p>
+                      {items.length === 0 && (
+                        <button onClick={() => { setItems(seedItems); setToastMessage("Sample bills added! Edit them to match your real bills."); }} className="rounded-lg border border-cyan-500 px-3 py-1.5 text-xs text-cyan-300 hover:bg-cyan-500/20">Add sample bills to get started</button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {/* Payment History */}
+            <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+              <h2 className="mb-3 text-lg font-semibold flex items-center">
+  📋 Payment History
+  <InfoModal title="Payment History">
+    <p>History of <strong>all your payments</strong> per bill.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li>Click a bill to <strong>expand</strong> its history</li>
+      <li>Each payment shows date & amount</li>
+      <li>Max 12 payments displayed per bill</li>
+    </ul>
+  </InfoModal>
+</h2>
+
+              {!canUsePremiumFeatures ? (
+                <div className="py-6 text-center">
+                  <p className="text-3xl">📋</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-300">Payment History</p>
+                  <p className="mt-1 text-xs text-slate-400">Track all your past payments</p>
+                  <button onClick={() => setShowLicenseModal(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                </div>
+              ) : items.length === 0 ? (
+
+                <p className="text-sm text-slate-400">No bills yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {items.map((item) => {
+                    const itemHistory = paymentHistory.filter((ph) => ph.itemId === item.id);
+                    const isExpanded = paymentHistoryItem === item.id;
+                    return (
+                      <div key={item.id} className="rounded-lg border border-slate-800 bg-slate-950">
+                        <button
+                          onClick={() => setPaymentHistoryItem(isExpanded ? null : item.id)}
+                          className="flex w-full items-center justify-between p-3 text-left"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span>{item.type === "bill" ? "💡" : "🔄"}</span>
+                            <span className="text-sm font-medium">{item.name}</span>
+                            {item.note && <span className="text-xs text-slate-500 ml-2">📝 {item.note}</span>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-400">{itemHistory.length} payment{itemHistory.length !== 1 ? "s" : ""}</span>
+                            <span className={`text-xs transition-transform ${isExpanded ? "rotate-180" : ""}`}>▼</span>
+                          </div>
+                        </button>
+                        {isExpanded && (
+                          <div className="border-t border-slate-800 p-3">
+                            {itemHistory.length === 0 ? (
+                              <p className="text-xs text-slate-500">No payment history recorded yet.</p>
+                            ) : (
+                              <div className="space-y-1">
+                                {itemHistory.slice(0, 12).map((ph) => (
+                                  <div key={ph.id} className="flex items-center justify-between text-xs">
+                                    <span className="text-emerald-400">✅ Paid</span>
+                                    <span className="text-slate-300">{formatMoney(ph.amount)}</span>
+                                    <span className="text-slate-500">{new Date(ph.paidAt).toLocaleDateString()}</span>
+                                  </div>
+                                ))}
+                                {itemHistory.length > 12 && (
+                                  <p className="text-xs text-slate-500">...and {itemHistory.length - 12} more</p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+                        {/* Bill Splitter */}
+            <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+              {!canUsePremiumFeatures && (
+                <div className="py-6 text-center">
+                  <p className="text-3xl">🔀</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-300">Bill Splitter</p>
+                  <p className="mt-1 text-xs text-slate-400">Split bills easily with friends and family</p>
+                  <button onClick={() => setShowLicenseModal(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                </div>
+              )}
+              <div className={canUsePremiumFeatures ? "" : "hidden"}>
+              <h2 className="mb-3 text-lg font-semibold flex items-center">
+  🔀 Bill Splitter
+  <InfoModal title="Bill Splitter">
+    <p><strong>Split any bill</strong> between friends, family, or roommates.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li>Enter the <strong>total amount</strong> of the bill</li>
+      <li>Enter the <strong>number of people</strong></li>
+      <li>Optionally add a <strong>tip percentage</strong></li>
+      <li>Click <strong>"Split"</strong> to see each person's share</li>
+    </ul>
+    <p className="mt-2 text-amber-300">💡 Example: 600 MAD bill ÷ 4 people = 150 MAD/person</p>
+  </InfoModal>
+</h2>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={billSplitAmount}
+                  onChange={(e) => setBillSplitAmount(e.target.value)}
+                  placeholder={`Bill amount (${currency})`}
+                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+                />
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={billSplitPeople}
+                  onChange={(e) => setBillSplitPeople(e.target.value)}
+                  placeholder="Number of people"
+                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+                />
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={billSplitTip}
+                  onChange={(e) => setBillSplitTip(e.target.value)}
+                  placeholder="Tip % (optional)"
+                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+                />
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={calculateBillSplit} className="rounded-lg bg-cyan-500 px-4 py-2 font-semibold text-slate-950 hover:bg-cyan-400 active:scale-95 transition-all">🔀 Split</button>
+                <button onClick={resetBillSplit} className="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Reset</button>
+              </div>
+
+              {billSplitResult && (
+                <div className="mt-4 space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-4 text-center">
+                      <p className="text-xs text-slate-400">Per Person</p>
+                      <p className="text-2xl font-bold text-cyan-300">{billSplitResult.perPerson.toFixed(2)} <span className="text-sm text-slate-400">{currency}</span></p>
+                    </div>
+                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-center">
+                      <p className="text-xs text-slate-400">Total with Tip</p>
+                      <p className="text-2xl font-bold text-emerald-300">{billSplitResult.totalWithTip.toFixed(2)} <span className="text-sm text-slate-400">{currency}</span></p>
+                    </div>
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-center">
+                      <p className="text-xs text-slate-400">Tip Amount</p>
+                      <p className="text-2xl font-bold text-amber-300">{billSplitResult.tipAmount.toFixed(2)} <span className="text-sm text-slate-400">{currency}</span></p>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-center">
+                    <p className="text-sm text-slate-300">
+                      💡 {billSplitPeople} people × {billSplitResult.perPerson.toFixed(2)} {currency} = {billSplitResult.totalWithTip.toFixed(2)} {currency}
+                    </p>
+                  </div>
+                </div>
+              )}
+              </div>
+            </section>
+
             {/* Calendar */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
               <div className="mb-3 flex items-center justify-between">
@@ -3263,237 +4326,13 @@ const smartTips = useMemo(() => {
                         <div key={item.id} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950 p-2">
                           <div>
                             <p className="text-sm font-medium">{item.type === "bill" ? "💡 " : "🔄 "}{item.name}</p>
-                            <p className="text-xs text-slate-400">{item.category} · {formatMoney(item.amount)}</p>
+                            <p className="text-xs text-slate-400">{item.category} · {formatMoney(item.amount)}{item.note ? ` · 📝 ${item.note}` : ""}</p>
                           </div>
                           <span className={`text-xs ${item.paid ? "text-emerald-400" : item.daysUntil <= 3 ? "text-red-400" : "text-amber-400"}`}>{item.paid ? "✓ Paid" : `${item.daysUntil} day(s)`}</span>
                         </div>
                       ))}
                     </div>
                   )}
-                </div>
-              )}
-            </section>
-          </>
-        )}
-
-        {/* ===== TAB: BILLS ===== */}
-        {activeTab === "bills" && (
-          <>
-            {/* Smart Add Form */}
-            <section className="mb-6">
-              <form onSubmit={onAddItem} className="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <h2 className="text-lg font-semibold flex items-center">
-  {editingItemId ? "Edit item" : "Smart Add"}
-  <InfoModal title="Smart Add">
-    <p>Add or edit a <strong>bill or subscription</strong> quickly.</p>
-    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li><strong>Name</strong> — Bill name</li>
-      <li><strong>Amount</strong> — Amount in your currency</li>
-      <li><strong>Due Day</strong> — Day of month (1-31)</li>
-      <li><strong>Category</strong> — Custom category</li>
-      <li><strong>Type</strong> — Bill or Subscription</li>
-      <li><strong>Reminder</strong> — Remind X days before (0-20)</li>
-    </ul>
-    <p className="mt-2 text-cyan-300">💡 Click a template above to auto-fill!</p>
-  </InfoModal>
-</h2>
-                <div className="flex flex-wrap gap-2">
-                  {templates.map((template) => (
-                    <button key={template.name} type="button" onClick={() => applyTemplate(template)} className="rounded-full border border-slate-700 px-3 py-1 text-sm text-slate-200">{template.name}</button>
-                  ))}
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Name" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
-                  <div className="space-y-2">
-                    <input type="number" min={0} step="0.01" value={form.amount > 0 ? Number(fromUSD(form.amount, currency, currencyToUSD).toFixed(2)) : ""} onChange={(e) => setForm((prev) => ({ ...prev, amount: toUSD(Number(e.target.value || 0), currency, currencyToUSD) }))} placeholder={`Amount (${currency})`} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
-                    <div className="flex flex-wrap gap-1">
-                      {[50, 100, 200, 300, 500, 1000].map((preset) => (
-                        <button key={preset} type="button" onClick={() => setForm((prev) => ({ ...prev, amount: toUSD(preset, currency, currencyToUSD) }))} className="rounded-md border border-slate-700 px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800">{preset}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <input type="number" min={1} max={31} value={form.dueDay > 0 ? form.dueDay : ""} onChange={(e) => setForm((prev) => ({ ...prev, dueDay: Number(e.target.value || 0) }))} placeholder="Due day" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
-                  <input value={form.category} onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))} placeholder="Category" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
-                  <select value={form.type} onChange={(e) => setForm((prev) => ({ ...prev, type: e.target.value as ItemType }))} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
-                    <option value="bill">Bill</option>
-                    <option value="subscription">Subscription</option>
-                  </select>
-                  <input type="number" min={0} max={20} value={form.reminderDays >= 0 ? form.reminderDays : ""} onChange={(e) => setForm((prev) => ({ ...prev, reminderDays: e.target.value === "" ? -1 : Number(e.target.value) }))} placeholder="Reminder days" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button type="submit" className="rounded-lg bg-cyan-500 px-4 py-2 font-semibold text-slate-950">{editingItemId ? "Save changes" : "Add item"}</button>
-                  <button type="button" onClick={saveTemplate} className="rounded-lg border border-slate-600 px-4 py-2">Save as template</button>
-                  {editingItemId && <button type="button" onClick={resetForm} className="rounded-lg border border-slate-600 px-4 py-2">Cancel edit</button>}
-                </div>
-              </form>
-            </section>
-
-            {/* Search & Filter */}
-            <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <h2 className="mb-3 text-lg font-semibold flex items-center">
-  Search & Filter
-  <InfoModal title="Search & Filter">
-    <p>Filter your bills to find what you need:</p>
-    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li><strong>Search</strong> — Search by bill name</li>
-      <li><strong>Status</strong> — All / Due soon / Paid / Unpaid</li>
-      <li><strong>Category</strong> — Filter by category</li>
-      <li><strong>Reset</strong> — Clear all filters</li>
-    </ul>
-  </InfoModal>
-</h2>
-              <div className="grid gap-3 sm:grid-cols-4">
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
-                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
-                  <option value="all">All</option>
-                  <option value="dueSoon">Due soon</option>
-                  <option value="paid">Paid</option>
-                  <option value="unpaid">Unpaid</option>
-                </select>
-                <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
-                  <option value="all">All categories</option>
-                  {categories.map((category) => <option key={category} value={category}>{category}</option>)}
-                </select>
-                <button onClick={() => { setSearch(""); setStatusFilter("all"); setCategoryFilter("all"); }} className="rounded-lg border border-slate-700 px-3 py-2">Reset</button>
-              </div>
-            </section>
-
-            {/* Bills List */}
-            <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-lg font-semibold flex items-center">
-  Bills & Subscriptions
-  <InfoModal title="Bills & Subscriptions">
-    <p>Your full list of bills with status and actions:</p>
-    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li><strong className="text-cyan-300">Quick edit</strong> — Change amount & due day</li>
-      <li><strong className="text-cyan-300">Edit</strong> — Full edit form</li>
-      <li><strong className="text-emerald-300">✓ Mark paid</strong> — Paid this month</li>
-      <li><strong className="text-red-300">Delete</strong> — Remove permanently</li>
-    </ul>
-  </InfoModal>
-</h2>
-                {filtered.some((item) => !item.paid) && (
-                  <button onClick={() => { filtered.filter((item) => !item.paid).forEach((item) => markPaid(item.id)); setToastMessage("All visible items marked as paid."); }} className="rounded-lg border border-emerald-600 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 active:scale-95 transition-transform">✓ Mark all visible as paid</button>
-                )}
-              </div>
-              <div className="space-y-3">
-                {filtered.map((item) => (
-                  <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3">
-                    <div>
-                      <p className="font-medium">{item.type === "bill" ? "💡 " : "🔄 "}{item.name}</p>
-                      {inlineEditId === item.id ? (
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-                          <input type="number" min={0} step="0.01" value={inlineDraft.amount} onChange={(e) => setInlineDraft((prev) => ({ ...prev, amount: e.target.value }))} className="w-28 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1" />
-                          <input type="number" min={1} max={31} value={inlineDraft.dueDay} onChange={(e) => setInlineDraft((prev) => ({ ...prev, dueDay: e.target.value }))} className="w-24 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1" />
-                          <span className="text-slate-400">{item.category}</span>
-                        </div>
-                      ) : (
-                        <p className="text-sm text-slate-400">{formatMoney(item.amount)} · due day {item.dueDay} · {item.category}</p>
-                      )}
-                      <div className="flex items-center gap-3">
-                        <p className={`text-xs ${item.paid ? "text-emerald-400" : item.daysUntil <= 2 ? "text-red-400" : "text-slate-400"}`}>{item.paid ? "✓ Paid this month" : `Due in ${item.daysUntil} day(s)`}</p>
-                        {item.lastPaidAt && <p className="text-xs text-slate-500">Last paid: {new Date(item.lastPaidAt).toLocaleDateString()}</p>}
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      {inlineEditId === item.id ? (
-                        <>
-                          <button onClick={() => saveInlineEdit(item.id)} className="rounded-lg bg-cyan-500 px-3 py-2 text-sm font-medium text-slate-950">Save</button>
-                          <button onClick={cancelInlineEdit} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Cancel</button>
-                        </>
-                      ) : (
-                        <>
-                          <button onClick={() => startInlineEdit(item.id)} className="rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-300">Quick edit</button>
-                          <button onClick={() => startEditItem(item.id)} className="rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-300">Edit</button>
-                        </>
-                      )}
-                      {!item.paid && <button onClick={() => markPaid(item.id)} className="rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 active:scale-95 transition-transform">✓ Mark paid</button>}
-                      <button onClick={() => { if (confirm(`Delete "${item.name}"? This cannot be undone.`)) { removeItem(item.id); } }} className="rounded-lg border border-red-700 px-3 py-2 text-sm text-red-300 hover:bg-red-500/20 active:scale-95 transition-transform">Delete</button>
-                    </div>
-                  </div>
-                ))}
-                {filtered.length === 0 && (
-                  <div className="py-8 text-center">
-                    <p className="text-4xl">📋</p>
-                    <div className="mt-3 space-y-2">
-                      <p className="text-sm text-slate-400">{items.length === 0 ? "No bills yet. Use Smart Add above to add your first bill, or tap a template to get started!" : "No items match this filter."}</p>
-                      {items.length === 0 && (
-                        <button onClick={() => { setItems(seedItems); setToastMessage("Sample bills added! Edit them to match your real bills."); }} className="rounded-lg border border-cyan-500 px-3 py-1.5 text-xs text-cyan-300 hover:bg-cyan-500/20">Add sample bills to get started</button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </section>
-
-            {/* Payment History */}
-            <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <h2 className="mb-3 text-lg font-semibold flex items-center">
-  📋 Payment History
-  <InfoModal title="Payment History">
-    <p>History of <strong>all your payments</strong> per bill.</p>
-    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li>Click a bill to <strong>expand</strong> its history</li>
-      <li>Each payment shows date & amount</li>
-      <li>Max 12 payments displayed per bill</li>
-    </ul>
-  </InfoModal>
-</h2>
-
-              {!canUsePremiumFeatures ? (
-                <div className="py-6 text-center">
-                  <p className="text-3xl">📋</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-300">Payment History</p>
-                  <p className="mt-1 text-xs text-slate-400">Track all your past payments</p>
-                  <button onClick={() => setShowPremiumPanel(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
-                </div>
-              ) : items.length === 0 ? (
-
-                <p className="text-sm text-slate-400">No bills yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {items.map((item) => {
-                    const itemHistory = paymentHistory.filter((ph) => ph.itemId === item.id);
-                    const isExpanded = paymentHistoryItem === item.id;
-                    return (
-                      <div key={item.id} className="rounded-lg border border-slate-800 bg-slate-950">
-                        <button
-                          onClick={() => setPaymentHistoryItem(isExpanded ? null : item.id)}
-                          className="flex w-full items-center justify-between p-3 text-left"
-                        >
-                          <div className="flex items-center gap-2">
-                            <span>{item.type === "bill" ? "💡" : "🔄"}</span>
-                            <span className="text-sm font-medium">{item.name}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-slate-400">{itemHistory.length} payment{itemHistory.length !== 1 ? "s" : ""}</span>
-                            <span className={`text-xs transition-transform ${isExpanded ? "rotate-180" : ""}`}>▼</span>
-                          </div>
-                        </button>
-                        {isExpanded && (
-                          <div className="border-t border-slate-800 p-3">
-                            {itemHistory.length === 0 ? (
-                              <p className="text-xs text-slate-500">No payment history recorded yet.</p>
-                            ) : (
-                              <div className="space-y-1">
-                                {itemHistory.slice(0, 12).map((ph) => (
-                                  <div key={ph.id} className="flex items-center justify-between text-xs">
-                                    <span className="text-emerald-400">✅ Paid</span>
-                                    <span className="text-slate-300">{formatMoney(ph.amount)}</span>
-                                    <span className="text-slate-500">{new Date(ph.paidAt).toLocaleDateString()}</span>
-                                  </div>
-                                ))}
-                                {itemHistory.length > 12 && (
-                                  <p className="text-xs text-slate-500">...and {itemHistory.length - 12} more</p>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
                 </div>
               )}
             </section>
@@ -3574,7 +4413,7 @@ const smartTips = useMemo(() => {
                     <p className="text-3xl">📉</p>
                     <p className="mt-2 text-sm font-semibold text-slate-300">6-Month Spending Trend</p>
                     <p className="mt-1 text-xs text-slate-400">See how your spending changes over time</p>
-                    <button onClick={() => setShowPremiumPanel(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                    <button onClick={() => setShowLicenseModal(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
                   </div>
                 ) : last6MonthsTotals.every((m) => m.total === 0) ? (
                   <p className="text-sm text-slate-400">Trend data will appear after a few months.</p>
@@ -3598,6 +4437,45 @@ const smartTips = useMemo(() => {
                 )}
               </div>
             </section>
+
+            {/* AI Predictions */}
+            {aiPrediction && (
+              <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+                <h2 className="mb-3 text-lg font-semibold flex items-center">
+  🤖 AI Spending Prediction
+  <InfoModal title="AI Spending Prediction">
+    <p>The app analyzes your <strong>last 6 months</strong> of spending to predict the future.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li><strong>Trend</strong> — Is spending going up or down?</li>
+      <li><strong>Estimate</strong> — Predicted next month spending</li>
+      <li><strong>Confidence</strong> — Based on how many months of data</li>
+    </ul>
+    <p className="mt-2 text-amber-300">💡 More months of use = better predictions!</p>
+  </InfoModal>
+</h2>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-center">
+                    <p className="text-xs text-slate-400">Trend</p>
+                    <p className={`text-xl font-bold ${aiPrediction.trendDirection === "up" ? "text-red-400" : aiPrediction.trendDirection === "down" ? "text-emerald-400" : "text-slate-300"}`}>
+                      {aiPrediction.trendDirection === "up" ? "📈" : aiPrediction.trendDirection === "down" ? "📉" : "➡️"} {Math.abs(aiPrediction.trendPercent)}%
+                    </p>
+                    <p className="text-xs text-slate-500">{aiPrediction.trendDirection === "up" ? "Increasing" : aiPrediction.trendDirection === "down" ? "Decreasing" : "Stable"}</p>
+                  </div>
+                  <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3 text-center">
+                    <p className="text-xs text-slate-400">Next Month Estimate</p>
+                    <p className="text-xl font-bold text-cyan-300">{formatMoney(aiPrediction.nextMonthEstimate)}</p>
+                    <p className="text-xs text-slate-500">predicted spending</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-center">
+                    <p className="text-xs text-slate-400">Confidence</p>
+                    <p className={`text-xl font-bold ${aiPrediction.confidence === "high" ? "text-emerald-400" : aiPrediction.confidence === "medium" ? "text-amber-400" : "text-red-400"}`}>
+                      {aiPrediction.confidence === "high" ? "🟢 High" : aiPrediction.confidence === "medium" ? "🟡 Medium" : "🔴 Low"}
+                    </p>
+                    <p className="text-xs text-slate-500">{aiPrediction.confidence === "high" ? "4+ months data" : aiPrediction.confidence === "medium" ? "3 months data" : "2 months data"}</p>
+                  </div>
+                </div>
+              </section>
+            )}
 
             {/* Expense by Category */}
             <section className="mb-6 grid gap-6 lg:grid-cols-2">
@@ -3639,8 +4517,117 @@ const smartTips = useMemo(() => {
                 )}
               </div>
 
-              {/* Category Limits */}
+                            {/* Spending Heatmap */}
               <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+                <h2 className="mb-3 text-lg font-semibold flex items-center">
+  🔥 Spending Heatmap
+  <InfoModal title="Spending Heatmap">
+    <p>A <strong>visual calendar</strong> showing your spending intensity this month.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li>🟩 <strong>Light</strong> — Low spending day</li>
+      <li>🟩 <strong>Dark</strong> — High spending day</li>
+      <li>⬜ <strong>Empty</strong> — No spending</li>
+      <li>🔵 <strong>Blue dot</strong> — Bills due</li>
+      <li>🟢 <strong>Green dot</strong> — Daily expenses logged</li>
+    </ul>
+    <p className="mt-2 text-amber-300">💡 Click on a day to see details!</p>
+  </InfoModal>
+</h2>
+
+                <div className="grid grid-cols-7 gap-1.5 text-center">
+                  {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => (
+                    <div key={d} className="py-1 text-xs font-medium text-slate-500">{d}</div>
+                  ))}
+                  {(() => {
+                    const now = new Date();
+                    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+                    const startPad = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
+                    const cells: React.ReactNode[] = [];
+
+                    for (let i = 0; i < startPad; i++) {
+                      cells.push(<div key={`pad-${i}`} className="h-9" />);
+                    }
+
+                    heatmapData.days.forEach((d) => {
+                      const isToday = d.day === now.getDate();
+                      const isSelected = d.day === heatmapSelectedDay;
+
+                      let bgColor = "bg-slate-800/30";
+                      if (d.intensity > 0) {
+                        if (d.intensity <= 0.25) bgColor = "bg-emerald-900/60";
+                        else if (d.intensity <= 0.5) bgColor = "bg-emerald-700/60";
+                        else if (d.intensity <= 0.75) bgColor = "bg-emerald-600/70";
+                        else bgColor = "bg-emerald-500/80";
+                      }
+
+                      cells.push(
+                        <button
+                          key={d.day}
+                          onClick={() => setHeatmapSelectedDay(heatmapSelectedDay === d.day ? null : d.day)}
+                          className={`relative flex h-9 items-center justify-center rounded-md text-xs transition-all ${bgColor} ${isSelected ? "ring-2 ring-cyan-400" : ""} ${isToday ? "font-bold text-white" : "text-slate-300"} hover:ring-1 hover:ring-cyan-400/50`}
+                        >
+                          {d.day}
+                          <div className="absolute bottom-0.5 left-1/2 flex -translate-x-1/2 gap-0.5">
+                            {d.hasBills && <span className="h-1 w-1 rounded-full bg-blue-400" />}
+                            {d.hasExpenses && <span className="h-1 w-1 rounded-full bg-emerald-300" />}
+                          </div>
+                        </button>
+                      );
+                    });
+
+                    return cells;
+                  })()}
+                </div>
+
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
+                  <div className="flex items-center gap-2">
+                    <span>Less</span>
+                    <span className="h-3 w-3 rounded-sm bg-slate-800/30" />
+                    <span className="h-3 w-3 rounded-sm bg-emerald-900/60" />
+                    <span className="h-3 w-3 rounded-sm bg-emerald-700/60" />
+                    <span className="h-3 w-3 rounded-sm bg-emerald-600/70" />
+                    <span className="h-3 w-3 rounded-sm bg-emerald-500/80" />
+                    <span>More</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-blue-400" /> Bills</span>
+                    <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> Expenses</span>
+                  </div>
+                </div>
+
+                {heatmapSelectedDay !== null && (() => {
+                  const dayData = heatmapData.days.find((d) => d.day === heatmapSelectedDay);
+                  if (!dayData || dayData.amount === 0) return (
+                    <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950 p-2 text-center">
+                      <p className="text-xs text-slate-500">No spending on day {heatmapSelectedDay}</p>
+                    </div>
+                  );
+                  return (
+                    <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-950/20 p-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium text-emerald-300">Day {heatmapSelectedDay}</p>
+                        <p className="text-sm font-bold text-emerald-400">{formatMoney(dayData.amount)}</p>
+                      </div>
+                      <div className="mt-1 flex gap-3 text-xs text-slate-400">
+                        {dayData.hasBills && <span>🔵 Bills due</span>}
+                        {dayData.hasExpenses && <span>🟢 Daily expenses</span>}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+                            {/* Category Limits */}
+              <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+              {!canUsePremiumFeatures && (
+                <div className="py-6 text-center">
+                  <p className="text-3xl">🏷️</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-300">Category Spending Limits</p>
+                  <p className="mt-1 text-xs text-slate-400">Set spending caps per category</p>
+                  <button onClick={() => setShowLicenseModal(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                </div>
+              )}
+              <div className={canUsePremiumFeatures ? "" : "hidden"}>
                 <h2 className="mb-3 text-lg font-semibold flex items-center">
   🏷️ Category Spending Limits
   <InfoModal title="Category Spending Limits">
@@ -3697,6 +4684,7 @@ const smartTips = useMemo(() => {
                     <button onClick={addCategoryLimit} className="rounded-lg bg-cyan-500 px-4 py-2 font-semibold text-slate-950">Set</button>
                   </div>
                 </div>
+                            </div>
               </div>
             </section>
 
@@ -3719,7 +4707,7 @@ const smartTips = useMemo(() => {
                   <p className="text-3xl">⚠️</p>
                   <p className="mt-2 text-sm font-semibold text-slate-300">Late Fee Calculator</p>
                   <p className="mt-1 text-xs text-slate-400">Track potential late fees for overdue bills</p>
-                  <button onClick={() => setShowPremiumPanel(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                  <button onClick={() => setShowLicenseModal(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
                 </div>
               ) : lateFeeRules.length === 0 ? (
 
@@ -3763,6 +4751,71 @@ const smartTips = useMemo(() => {
                 <button onClick={addLateFeeRule} className="rounded-lg bg-cyan-500 px-4 py-2 font-semibold text-slate-950">Add Rule</button>
               </div>
             </section>
+
+                        {/* Monthly Comparison */}
+            <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+              <h2 className="mb-3 text-lg font-semibold flex items-center">
+  📊 This Month vs Last Month
+  <InfoModal title="Monthly Comparison">
+    <p>Compare your <strong>current month</strong> spending with <strong>last month</strong>.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li><span className="text-emerald-400">🟢 Decreased</span> — You spent less</li>
+      <li><span className="text-red-400">🔴 Increased</span> — You spent more</li>
+      <li><span className="text-slate-400">⚪ Same</span> — No change</li>
+    </ul>
+    <p className="mt-2 text-amber-300">💡 Visible after 2+ months of use!</p>
+  </InfoModal>
+</h2>
+
+              {monthlyComparison == null ? (
+                <div className="py-4 text-center">
+                  <p className="text-3xl">📊</p>
+                  <p className="mt-2 text-sm text-slate-400">Comparison available after 2 months of use.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-center">
+                      <p className="text-xs text-slate-400">This Month</p>
+                      <p className="text-xl font-bold text-cyan-300">{formatMoney(monthlyComparison.currentTotal)}</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-center">
+                      <p className="text-xs text-slate-400">Last Month</p>
+                      <p className="text-xl font-bold text-slate-300">{formatMoney(monthlyComparison.previousTotal)}</p>
+                    </div>
+                    <div className={`rounded-lg border p-3 text-center ${monthlyComparison.direction === "up" ? "border-red-500/30 bg-red-950/20" : monthlyComparison.direction === "down" ? "border-emerald-500/30 bg-emerald-950/20" : "border-slate-800 bg-slate-950"}`}>
+                      <p className="text-xs text-slate-400">Difference</p>
+                      <p className={`text-xl font-bold ${monthlyComparison.direction === "up" ? "text-red-400" : monthlyComparison.direction === "down" ? "text-emerald-400" : "text-slate-300"}`}>
+                        {monthlyComparison.direction === "up" ? "📈 +" : monthlyComparison.direction === "down" ? "📉 " : "➡️ "}{Math.abs(monthlyComparison.percentChange)}%
+                      </p>
+                      <p className="text-xs text-slate-500">{formatMoney(Math.abs(monthlyComparison.diff))} {monthlyComparison.direction === "up" ? "more" : monthlyComparison.direction === "down" ? "less" : ""}</p>
+                    </div>
+                  </div>
+
+                  {monthlyComparison.categories.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-slate-400">By Category:</p>
+                      {monthlyComparison.categories.map((cat) => (
+                        <div key={cat.category} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950 p-2.5">
+                          <div className="flex items-center gap-2">
+                            <span className={`h-2.5 w-2.5 rounded-full ${cat.direction === "up" ? "bg-red-400" : cat.direction === "down" ? "bg-emerald-400" : "bg-slate-500"}`} />
+                            <span className="text-sm font-medium">{cat.category}</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs text-slate-400">{formatMoney(cat.current)}</span>
+                            <span className={`text-xs font-medium ${cat.direction === "up" ? "text-red-400" : cat.direction === "down" ? "text-emerald-400" : "text-slate-500"}`}>
+                              {cat.direction === "up" ? "📈" : cat.direction === "down" ? "📉" : "➡️"}
+                              {cat.previous > 0 ? ` ${cat.percent > 0 ? "+" : ""}${cat.percent}%` : " New"}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+
           </>
         )}
 
@@ -3842,7 +4895,7 @@ const smartTips = useMemo(() => {
                           <div><p className="text-sm font-medium">{acc.name}</p><p className="text-xs text-slate-400 capitalize">{acc.type}</p></div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <button onClick={() => { const input = prompt(`Update balance for "${acc.name}" (${currency}):`, String(fromUSD(acc.balance, currency, currencyToUSD).toFixed(2))); if (input !== null) { const val = toUSD(Number(input), currency, currencyToUSD); if (Number.isFinite(val)) updateAccountBalance(acc.id, val); } }} className={`text-sm font-bold ${acc.balance >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatMoney(acc.balance)}</button>
+                          <button onClick={() => { setEditBalanceAccount(acc); setEditBalanceInput(fromUSD(acc.balance, currency, currencyToUSD).toFixed(2)); }} className={`text-sm font-bold ${acc.balance >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatMoney(acc.balance)}</button>
                           <button onClick={() => removeAccount(acc.id)} className="text-xs text-red-300 hover:text-red-200">✕</button>
                         </div>
                       </div>
@@ -3917,7 +4970,7 @@ const smartTips = useMemo(() => {
                           <div className="flex items-center justify-between">
                             <div><p className="font-medium">{isComplete ? "✅ " : "🎯 "}{goal.label}</p><p className="text-xs text-slate-400">{formatMoney(goal.savedAmount)} / {formatMoney(goal.targetAmount)}</p></div>
                             <div className="flex items-center gap-2">
-                              {!isComplete && <button onClick={() => { const input = prompt(`Add to "${goal.label}" (${currency}):`, "100"); if (input) { const val = toUSD(Number(input), currency, currencyToUSD); if (val > 0) addToSavings(goal.id, val); } }} className="rounded-lg border border-cyan-500 px-2 py-1 text-xs text-cyan-300 hover:bg-cyan-500/20">+ Add</button>}
+                              {!isComplete && <button onClick={() => { setAddToSavingsGoal(goal); setAddSavingsInput("100"); }} className="rounded-lg border border-cyan-500 px-2 py-1 text-xs text-cyan-300 hover:bg-cyan-500/20">+ Add</button>}
                               <button onClick={() => removeSavingsGoal(goal.id)} className="text-xs text-red-300 hover:text-red-200">✕</button>
                             </div>
                           </div>
@@ -3960,7 +5013,7 @@ const smartTips = useMemo(() => {
                   <p className="text-3xl">📈</p>
                   <p className="mt-2 text-sm font-semibold text-slate-300">Savings Projections</p>
                   <p className="mt-1 text-xs text-slate-400">See how much to save per month to reach your goals</p>
-                  <button onClick={() => setShowPremiumPanel(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                  <button onClick={() => setShowLicenseModal(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
                 </div>
               ) : savingsGoals.length === 0 ? (
 
@@ -4057,6 +5110,146 @@ const smartTips = useMemo(() => {
                 </div>
               )}
             </section>
+
+{/* Daily Expense Tracker */}
+            <section className="mb-6 rounded-xl border border-emerald-500/30 bg-slate-900 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-lg font-semibold flex items-center">
+  💸 Daily Expenses
+  <InfoModal title="Daily Expenses">
+    <p>Log your <strong>daily spending</strong> beyond recurring bills.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li>☕ Coffee, 🍕 Food, 🚌 Transport</li>
+      <li>🛍️ Shopping, 🎬 Entertainment</li>
+      <li>Anything you spend money on daily</li>
+    </ul>
+    <p className="mt-2 text-amber-300">💡 Track daily to see where your money really goes!</p>
+  </InfoModal>
+</h2>
+                <button onClick={() => setShowDailyExpense((prev) => !prev)} className="rounded-lg border border-emerald-500 px-3 py-1.5 text-xs text-emerald-300 hover:bg-emerald-500/20">
+                  {showDailyExpense ? "Hide" : "+ Add Expense"}
+                </button>
+              </div>
+
+              {/* Quick stats */}
+              <div className="grid gap-2 sm:grid-cols-3">
+                <div className="rounded-lg border border-slate-800 bg-slate-950 p-2 text-center">
+                  <p className="text-xs text-slate-400">Today</p>
+                  <p className="text-sm font-bold text-red-400">{formatMoney(todayTotal)}</p>
+                  <p className="text-[10px] text-slate-500">{todayExpenses.length} expense{todayExpenses.length !== 1 ? "s" : ""}</p>
+                </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-950 p-2 text-center">
+                  <p className="text-xs text-slate-400">This Week</p>
+                  <p className="text-sm font-bold text-amber-400">{formatMoney(weekTotal)}</p>
+                </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-950 p-2 text-center">
+                  <p className="text-xs text-slate-400">This Month</p>
+                  <p className="text-sm font-bold text-cyan-300">{formatMoney(monthlyExpenseTotal)}</p>
+                </div>
+              </div>
+
+              {/* Add form */}
+              {showDailyExpense && (
+                <div className="mt-3 grid gap-2 border-t border-slate-800 pt-3 sm:grid-cols-4">
+                  <input value={dailyExpenseForm.description} onChange={(e) => setDailyExpenseForm((prev) => ({ ...prev, description: e.target.value }))} placeholder="What did you spend on?" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+                  <input type="number" min={0} step="0.01" value={dailyExpenseForm.amount > 0 ? Number(fromUSD(dailyExpenseForm.amount, currency, currencyToUSD).toFixed(2)) : ""} onChange={(e) => setDailyExpenseForm((prev) => ({ ...prev, amount: toUSD(Number(e.target.value || 0), currency, currencyToUSD) }))} placeholder={`Amount (${currency})`} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+                  <select value={dailyExpenseForm.category} onChange={(e) => setDailyExpenseForm((prev) => ({ ...prev, category: e.target.value }))} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
+                    {DAILY_EXPENSE_CATEGORIES.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+                  </select>
+                  <button onClick={addDailyExpense} className="rounded-lg bg-emerald-500 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-400 active:scale-95 transition-all">+ Log</button>
+                </div>
+              )}
+
+              {/* Today's expenses */}
+              {todayExpenses.length > 0 && (
+                <div className="mt-3 space-y-1.5 border-t border-slate-800 pt-3">
+                  <p className="text-xs font-medium text-slate-400">Today's expenses:</p>
+                  {todayExpenses.map((exp) => (
+                    <div key={exp.id} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950 p-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs">{exp.category === "Food" ? "🍕" : exp.category === "Transport" ? "🚌" : exp.category === "Shopping" ? "🛍️" : exp.category === "Entertainment" ? "🎬" : exp.category === "Health" ? "💊" : exp.category === "Education" ? "📚" : exp.category === "Bills" ? "💡" : exp.category === "Gift" ? "🎁" : "💸"}</span>
+                        <div>
+                          <p className="text-sm">{exp.description}</p>
+                          <p className="text-[10px] text-slate-500">{exp.category} · {new Date(exp.date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-red-400">-{formatMoney(exp.amount)}</span>
+                        <button onClick={() => removeDailyExpense(exp.id)} className="text-xs text-red-300 hover:text-red-200">✕</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Today by category */}
+              {dailyExpenseByCategory.length > 1 && (
+                <div className="mt-3 space-y-1.5 border-t border-slate-800 pt-3">
+                  <p className="text-xs font-medium text-slate-400">Today by category:</p>
+                  {dailyExpenseByCategory.map(([cat, total]) => {
+                    const percent = todayTotal > 0 ? Math.round((total / todayTotal) * 100) : 0;
+                    return (
+                      <div key={cat} className="flex items-center justify-between">
+                        <span className="text-xs text-slate-300">{cat}</span>
+                        <div className="flex items-center gap-2">
+                          <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-800">
+                            <div className="h-1.5 rounded-full bg-emerald-500" style={{ width: `${Math.max(4, percent)}%` }} />
+                          </div>
+                          <span className="text-xs text-slate-400">{formatMoney(total)} ({percent}%)</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {/* Achievements Preview */}
+            <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold flex items-center">
+  🏆 Achievements
+  <InfoModal title="Achievements">
+    <p><strong>Earn badges</strong> by using the app! Achievements unlock automatically.</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li>🎯 Add your first bill</li>
+      <li>✅ Pay all bills in a month</li>
+      <li>🐷 Save 20%+ of income</li>
+      <li>📋 Set a budget</li>
+      <li>💯 Reach 80+ health score</li>
+      <li>🏦 Add an account</li>
+      <li>And many more!</li>
+    </ul>
+    <p className="mt-2 text-amber-300">💡 Keep using the app to unlock all achievements!</p>
+  </InfoModal>
+</h2>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-400">{achievements.length} unlocked</span>
+                  <button onClick={() => setShowAchievements((prev) => !prev)} className="rounded-lg border border-cyan-500 px-3 py-1.5 text-xs text-cyan-300 hover:bg-cyan-500/20">
+                    {showAchievements ? "Hide" : "View All"}
+                  </button>
+                </div>
+              </div>
+
+              {achievements.length === 0 ? (
+                <div className="py-4 text-center">
+                  <p className="text-3xl">🏆</p>
+                  <p className="mt-2 text-sm text-slate-400">Start using the app to earn achievements!</p>
+                  <p className="text-xs text-slate-500 mt-1">Add bills, pay on time, save money...</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                  {achievements.slice(0, showAchievements ? 50 : 5).map((ach) => (
+                    <div key={ach.id} className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-center">
+                      <p className="text-2xl">{ach.icon}</p>
+                      <p className="text-xs font-medium text-amber-200 mt-1">{ach.title}</p>
+                      <p className="text-[10px] text-slate-500">{new Date(ach.unlockedAt).toLocaleDateString()}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
           </>
         )}
 
@@ -4064,22 +5257,27 @@ const smartTips = useMemo(() => {
         {activeTab === "settings" && (
           <>
 
-            {/* Subscription Status */}
+ {/* Subscription Status */}
+                       {!IS_PLAYSTORE && (
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
               <h2 className="text-lg font-semibold">Subscription Status</h2>
               <p className="mt-2 text-sm text-slate-300">Status: {entitlement.loading ? "Checking" : canUsePremiumFeatures ? "Premium active" : "Free plan"}{entitlement.productId ? ` · ${entitlement.productId}` : ""}{entitlement.expiresAt ? ` · Renewal ${new Date(entitlement.expiresAt).toLocaleDateString()}` : ""}</p>
               {entitlement.error && <p className="mt-1 text-xs text-red-300">{entitlement.error}</p>}
               <div className="mt-3 flex flex-wrap gap-2">
-                <button
-  onClick={() => window.open(WEBSITE_PAYMENT_URL, "_blank")}
-  className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300"
->
-  Manage Subscription (PayPal / Gumroad)
-</button>
+                                {!IS_PLAYSTORE && (
+                  <button
+                    onClick={() => window.open(GUMROAD_PRODUCT_URL, "_blank")}
+                    className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300"
+                  >
+                    Manage Subscription (Gumroad)
+                  </button>
+                )}
                 <button onClick={() => void refreshEntitlement()} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300">Refresh</button>
-                {!canUsePremiumFeatures && <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950">Upgrade</button>}
+                {!IS_PLAYSTORE && !canUsePremiumFeatures && <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950">Upgrade</button>}
+{!IS_PLAYSTORE && <button onClick={() => setShowPremiumPanel((prev) => !prev)} className="rounded-lg border border-amber-500 px-3 py-2 text-sm text-amber-300">🔑 Enter License</button>}
               </div>
             </section>
+            )}
 
             {/* Preferences */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
@@ -4097,12 +5295,55 @@ const smartTips = useMemo(() => {
                   <div><p className="text-sm font-medium">Payment-day sound</p><p className="text-xs text-slate-400">{dueDaySoundEnabled ? "ON" : "OFF"}</p></div>
                   <button onClick={() => { setDueDaySoundEnabled((prev) => !prev); setToastMessage(dueDaySoundEnabled ? "Sound disabled" : "Sound enabled"); }} className={`rounded-lg border px-3 py-1.5 text-sm ${dueDaySoundEnabled ? "border-emerald-500 text-emerald-300" : "border-slate-600 text-slate-300"}`}>{dueDaySoundEnabled ? "🔔 ON" : "🔕 OFF"}</button>
                 </div>
+
+                <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <p className="text-sm font-medium flex items-center">
+  Reminder Rules
+  <InfoModal title="Reminder Rules">
+    <p>Configure <strong>3 levels of reminders</strong> for your bills:</p>
+    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+      <li>🔴 <strong>Before</strong> — Remind X days before due date</li>
+      <li>🟡 <strong>On due day</strong> — Remind on the day itself</li>
+      <li>🔵 <strong>After</strong> — Alert X days after if still unpaid</li>
+    </ul>
+    <p className="mt-2 text-amber-300">💡 These are global rules. Each bill also has its own reminder setting.</p>
+  </InfoModal>
+</p>
+                      <p className="text-xs text-slate-400">Customize when to get reminded</p>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-red-300">🔴 Days before</p>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setReminderSettings((prev) => ({ ...prev, daysBefore: Math.max(0, prev.daysBefore - 1) }))} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800">−</button>
+                        <span className="w-8 text-center text-sm font-bold">{reminderSettings.daysBefore}</span>
+                        <button onClick={() => setReminderSettings((prev) => ({ ...prev, daysBefore: Math.min(30, prev.daysBefore + 1) }))} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800">+</button>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-amber-300">🟡 On due day</p>
+                      <button onClick={() => setReminderSettings((prev) => ({ ...prev, onDueDay: !prev.onDueDay }))} className={`rounded-lg border px-3 py-1.5 text-sm ${reminderSettings.onDueDay ? "border-emerald-500 text-emerald-300" : "border-slate-600 text-slate-300"}`}>{reminderSettings.onDueDay ? "✓ ON" : "OFF"}</button>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-blue-300">🔵 Days after (unpaid alert)</p>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setReminderSettings((prev) => ({ ...prev, daysAfter: Math.max(0, prev.daysAfter - 1) }))} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800">−</button>
+                        <span className="w-8 text-center text-sm font-bold">{reminderSettings.daysAfter}</span>
+                        <button onClick={() => setReminderSettings((prev) => ({ ...prev, daysAfter: Math.min(30, prev.daysAfter + 1) }))} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800">+</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
               </div>
             </section>
 
             {/* Security & Backup */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <h2 className="mb-3 text-lg font-semibold">Security & Backup</h2>
+              <h2 className="mb-3 text-lg font-semibold">Security</h2>
               <div className="space-y-3">
                 <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
                   <p className="text-sm text-slate-300">App lock PIN (4-8 digits)</p>
@@ -4112,29 +5353,18 @@ const smartTips = useMemo(() => {
                     <button onClick={removePin} className="rounded-lg border border-slate-700 px-3 py-2 text-red-300">Remove PIN</button>
                   </div>
                 </div>
-                <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
-                  <p className="text-sm text-slate-300">Backup & Restore</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <button onClick={exportBackup} className="rounded-lg border border-emerald-600 px-3 py-2 text-emerald-300">Export backup</button>
-                    <label className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200">Restore backup<input type="file" accept="application/json" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) void restoreBackup(file); }} /></label>
-                                        {canUsePremiumFeatures ? (
-                      <>
-                        <button onClick={exportCsv} className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200 hover:bg-slate-800 transition">Export CSV</button>
-                        <button onClick={exportHtmlReport} className="rounded-lg border border-slate-700 px-3 py-2 text-slate-200 hover:bg-slate-800 transition">Export Report (HTML)</button>
-                      </>
-                    ) : (
-                      <>
-                        <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg border border-amber-500/50 px-3 py-2 text-amber-300 hover:bg-amber-500/10 transition">🔒 Export CSV</button>
-                        <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg border border-amber-500/50 px-3 py-2 text-amber-300 hover:bg-amber-500/10 transition">🔒 Export Report (HTML)</button>
-                      </>
-                    )}
-                  </div>
-                </div>
+                          
                 <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
                   <p className="text-sm text-slate-300">Session & Account</p>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <button onClick={() => void handleLogoutAllDevices()} className="rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-200">Log out all devices</button>
-                    <button onClick={() => setShowLegal(true)} className="rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-200">Privacy & Terms</button>
+                                        <button onClick={generateMonthlyReport} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300">📊 Monthly Report</button>
+                    
+                                        {!IS_PLAYSTORE && <button onClick={() => setShowLegal(true)} className="rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-200">Privacy & Terms</button>}
+
+<button onClick={() => setShowLicenseModal(true)} className="rounded-lg border border-amber-500 px-3 py-2 text-sm text-amber-300">🔑 License</button>
+
+<button onClick={handleLogout} className="rounded-lg border border-red-500 px-3 py-2 text-sm text-red-300">🚪 Log out</button>
+
                     <button onClick={() => setShowDeleteAccountDialog(true)} className="rounded-lg border border-red-500 px-3 py-2 text-sm text-red-300">Delete account</button>
                   </div>
                 </div>
@@ -4157,6 +5387,99 @@ const smartTips = useMemo(() => {
             </div>
           </div>
         )}
+        {deleteConfirmItem && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
+            <div className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-4">
+              <h3 className="text-lg font-semibold text-red-300">Delete "{deleteConfirmItem.name}"?</h3>
+              <p className="mt-2 text-sm text-slate-300">This cannot be undone.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={() => { removeItem(deleteConfirmItem.id); setDeleteConfirmItem(null); }} className="rounded-lg border border-red-500 px-3 py-2 text-sm text-red-300">Delete</button>
+                <button onClick={() => setDeleteConfirmItem(null)} className="rounded-lg border border-slate-600 px-3 py-2 text-sm">Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {editBalanceAccount && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
+            <div className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-4">
+              <h3 className="text-lg font-semibold">Update balance for "{editBalanceAccount.name}"</h3>
+              <input type="number" min={0} step="0.01" value={editBalanceInput} onChange={(e) => setEditBalanceInput(e.target.value)} placeholder={`Amount (${currency})`} className="mt-3 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={() => { const val = toUSD(Number(editBalanceInput), currency, currencyToUSD); if (Number.isFinite(val)) { updateAccountBalance(editBalanceAccount.id, val); setEditBalanceAccount(null); } }} className="rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950">Save</button>
+                <button onClick={() => setEditBalanceAccount(null)} className="rounded-lg border border-slate-600 px-3 py-2 text-sm">Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {addToSavingsGoal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
+            <div className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-4">
+              <h3 className="text-lg font-semibold">Add to "{addToSavingsGoal.label}"</h3>
+              <input type="number" min={0} step="0.01" value={addSavingsInput} onChange={(e) => setAddSavingsInput(e.target.value)} placeholder={`Amount (${currency})`} className="mt-3 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={() => { const val = toUSD(Number(addSavingsInput), currency, currencyToUSD); if (val > 0) { addToSavings(addToSavingsGoal.id, val); setAddToSavingsGoal(null); } }} className="rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950">Add</button>
+                <button onClick={() => setAddToSavingsGoal(null)} className="rounded-lg border border-slate-600 px-3 py-2 text-sm">Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+                {showLicenseModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
+            <div className="w-full max-w-md rounded-xl border border-amber-500/40 bg-slate-900 p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-semibold text-amber-300">🔑 Activate License</h3>
+                <button onClick={() => setShowLicenseModal(false)} className="text-slate-400 hover:text-white text-xl">✕</button>
+              </div>
+              <p className="text-xs text-slate-400 mb-3">Enter the email and license key you received in your Gumroad receipt email.</p>
+
+              <div className="space-y-2">
+                <input
+                  type="email"
+                  value={licenseEmail}
+                  onChange={(e) => setLicenseEmail(e.target.value)}
+                  placeholder="Email used at purchase"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+                />
+                <input
+                  type="text"
+                  value={licenseKey}
+                  onChange={(e) => setLicenseKey(e.target.value)}
+                  placeholder="License key (e.g. ABCD-1234-EFGH-5678)"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+                />
+                {licenseError && <p className="text-xs text-red-400">{licenseError}</p>}
+
+                <button
+                  onClick={() => void verifyLicense()}
+                  disabled={licenseActivating}
+                  className="w-full rounded-lg bg-amber-400 px-3 py-2.5 text-sm font-bold text-slate-950 hover:bg-amber-300 disabled:opacity-60"
+                >
+                  {licenseActivating ? "Activating..." : "✓ Activate License"}
+                </button>
+
+                <button
+                  onClick={() => setShowLicenseModal(false)}
+                  className="w-full rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-300"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-3">
+                <p className="text-xs text-slate-400">💡 Don't have a license yet?</p>
+                <button
+  onClick={() => { setShowLicenseModal(false); window.open("https://app4clients.com/", "_blank"); }}
+  className="mt-2 w-full rounded-lg border border-cyan-500 px-3 py-2 text-xs text-cyan-300 hover:bg-cyan-500/10"
+>
+  💎 View Premium Plans
+</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {showLegal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
@@ -4168,12 +5491,14 @@ const smartTips = useMemo(() => {
                 <p>Terms: subscriptions are processed securely via Gumroad. You can pay with PayPal, Credit Card, or Apple Pay. Cancel anytime from your Gumroad account.</p>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <button
-  onClick={() => window.open("https://app4clients.gumroad.com/l/vhabmx", "_blank")}
-  className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300"
->
-  Manage Subscription
-</button>
+                                {!IS_PLAYSTORE && (
+                  <button
+                    onClick={() => window.open(GUMROAD_PRODUCT_URL, "_blank")}
+                    className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300"
+                  >
+                    Manage Subscription
+                  </button>
+                )}
                 <button onClick={() => setShowLegal(false)} className="rounded-lg border border-slate-600 px-3 py-2 text-sm">Close</button>
               </div>
             </div>
