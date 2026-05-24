@@ -610,6 +610,17 @@ const [accountForm, setAccountForm] = useState({ name: "", type: "bank" as Accou
   const [inlineDraft, setInlineDraft] = useState<{ amount: string; dueDay: string }>({ amount: "", dueDay: "" });
   const [showPremiumPanel, setShowPremiumPanel] = useState(false);
   const [showLegal, setShowLegal] = useState(false);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+const [changePasswordStep, setChangePasswordStep] = useState<"request" | "reset">("request");
+const [changePasswordToken, setChangePasswordToken] = useState("");
+const [changePasswordNewPassword, setChangePasswordNewPassword] = useState("");
+const [changePasswordSubmitting, setChangePasswordSubmitting] = useState(false);
+const [changePasswordInfo, setChangePasswordInfo] = useState("");
+const [changePasswordError, setChangePasswordError] = useState("");
+const [changePasswordResendAvailableAt, setChangePasswordResendAvailableAt] = useState(0);
+const [changePasswordNow, setChangePasswordNow] = useState(() => Date.now());
+const [showChangePasswordToken, setShowChangePasswordToken] = useState(false);
+const [showChangePasswordNewPassword, setShowChangePasswordNewPassword] = useState(false);
   const [showDeleteAccountDialog, setShowDeleteAccountDialog] = useState(false);
   const [deleteAccountConfirmInput, setDeleteAccountConfirmInput] = useState("");
   const [notificationCenter, setNotificationCenter] = useState<NotificationEntry[]>([]);
@@ -662,6 +673,14 @@ premiumActive: false,
   const [licenseError, setLicenseError] = useState("");
   const [showLicenseModal, setShowLicenseModal] = useState(false);
   const appUserId = currentUser?.appUserId ?? "";
+  // ===== OWNER OVERRIDE - Licence illimitée =====
+const OWNER_EMAILS = ["app4clients@gmail.com"];
+const OWNER_USERNAMES = ["app4clients"];
+
+const isOwner = currentUser && (
+  OWNER_EMAILS.includes(currentUser.email.toLowerCase()) ||
+  OWNER_USERNAMES.includes(currentUser.username.toLowerCase())
+);
   const userScopedKey = (key: string) => `${key}-${appUserId}`;
 
 useEffect(() => {
@@ -891,6 +910,16 @@ const refreshExchangeRates = useCallback(async () => {
       setForgotPasswordExpiresInMinutes(null);
     }
   }, [authMode]);
+
+  useEffect(() => {
+  if (!showChangePasswordModal || changePasswordResendAvailableAt <= Date.now()) {
+    return;
+  }
+  const timer = window.setInterval(() => {
+    setChangePasswordNow(Date.now());
+  }, 1000);
+  return () => window.clearInterval(timer);
+}, [showChangePasswordModal, changePasswordResendAvailableAt]);
 
   useEffect(() => {
     if (!forgotPasswordOpen || forgotPasswordResendAvailableAt <= Date.now()) {
@@ -1645,7 +1674,7 @@ localStorage.setItem(snapshotKey, JSON.stringify(monthlyTotal));
 
     const unreadNotificationCount = useMemo(() => notificationCenter.filter((n) => !n.read).length, [notificationCenter]);
 
- const canUsePremiumFeatures = entitlement.premiumActive;
+const canUsePremiumFeatures = isOwner || entitlement.premiumActive;
   const freeItemsLeft = Math.max(0, FREE_ITEM_LIMIT - items.length);
   const subscriptionExpired = Boolean(entitlement.expiresAt) && !canUsePremiumFeatures && new Date(entitlement.expiresAt as string).getTime() <= Date.now();
 
@@ -2727,58 +2756,6 @@ const handleAuthSubmit = async (event: FormEvent<HTMLFormElement>) => {
 
   const requestVerificationCode = async (email: string, source: "manual" | "post_reset" = "manual") => {
 
-  const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setAuthError("");
-    if (!AUTH_API_BASE_URL) {
-      setAuthError("Set VITE_AUTH_API_BASE_URL to verify email.");
-      return;
-    }
-    if (!EMAIL_REGEX.test(verificationEmail.trim())) {
-      setAuthError("Enter a valid verification email.");
-      return;
-    }
-    if (verificationCode.trim().length < 8) {
-      setAuthError("Enter a valid verification code.");
-      return;
-    }
-
-    setVerificationSubmitting(true);
-    try {
-      const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/verify-email`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: verificationEmail.trim(),
-          verificationCode: verificationCode.trim(),
-        }),
-      });
-      const data = (await response.json()) as {
-        ok?: boolean;
-        token?: string;
-        user?: AuthUser;
-        message?: string;
-      };
-      if (!response.ok || !data.ok || !data.token || !data.user) {
-        throw new Error(data.message ?? "Unable to verify email.");
-      }
-      localStorage.setItem(STORAGE_KEYS.authToken, data.token);
-      localStorage.setItem(STORAGE_KEYS.authUser, JSON.stringify(data.user));
-      setCurrentUser(data.user);
-      setVerificationEmail("");
-      setVerificationCode("");
-      setVerificationInfo("");
-      setToastMessage("Email verified successfully.");
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "Unable to verify email.");
-    } finally {
-      setVerificationSubmitting(false);
-    }
-  };
-
-  
     if (!AUTH_API_BASE_URL) {
       throw new Error("Set VITE_AUTH_API_BASE_URL to resend verification.");
     }
@@ -2879,6 +2856,152 @@ const handleAuthSubmit = async (event: FormEvent<HTMLFormElement>) => {
       setForgotPasswordSubmitting(false);
     }
   };
+
+  const openChangePasswordModal = () => {
+  setShowChangePasswordModal(true);
+  setChangePasswordStep("request");
+  setChangePasswordToken("");
+  setChangePasswordNewPassword("");
+  setChangePasswordInfo("");
+  setChangePasswordError("");
+  setChangePasswordResendAvailableAt(0);
+  setChangePasswordNow(Date.now());
+};
+
+const requestChangePasswordCode = async (isResend = false) => {
+  setChangePasswordError("");
+  setChangePasswordInfo("");
+
+  if (isResend && changePasswordResendAvailableAt > Date.now()) {
+    return;
+  }
+
+  if (!AUTH_API_BASE_URL) {
+    setChangePasswordError("Set VITE_AUTH_API_BASE_URL to enable password reset.");
+    return;
+  }
+
+  const email = currentUser?.email?.trim() ?? "";
+  if (!EMAIL_REGEX.test(email)) {
+    setChangePasswordError("Current user email is invalid.");
+    return;
+  }
+
+  setChangePasswordSubmitting(true);
+  try {
+    const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/forgot-password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email }),
+    });
+
+    const data = (await response.json()) as {
+      ok?: boolean;
+      message?: string;
+      resetToken?: string;
+      resetCode?: string;
+      expiresInMinutes?: number;
+    };
+
+    if (!response.ok || !data.ok) {
+      throw new Error(data.message ?? "Unable to request password reset code.");
+    }
+
+    const debugToken = data.resetCode ?? data.resetToken;
+    if (debugToken) {
+      setChangePasswordToken(debugToken);
+    }
+
+    setChangePasswordStep("reset");
+    setChangePasswordResendAvailableAt(Date.now() + 60 * 1000);
+    setChangePasswordNow(Date.now());
+    setChangePasswordInfo(
+      debugToken
+        ? "Verification code generated and auto-filled for testing."
+        : `Verification code sent to ${email}. Check inbox/spam.`
+    );
+  } catch (error) {
+    setChangePasswordError(error instanceof Error ? error.message : "Unable to request code.");
+  } finally {
+    setChangePasswordSubmitting(false);
+  }
+};
+
+const submitChangePasswordReset = async () => {
+  setChangePasswordError("");
+  setChangePasswordInfo("");
+
+  if (!AUTH_API_BASE_URL) {
+    setChangePasswordError("Set VITE_AUTH_API_BASE_URL to enable password reset.");
+    return;
+  }
+
+  const email = currentUser?.email?.trim() ?? "";
+  if (!EMAIL_REGEX.test(email)) {
+    setChangePasswordError("Current user email is invalid.");
+    return;
+  }
+
+  if (!changePasswordToken.trim() || changePasswordToken.trim().length < 8) {
+    setChangePasswordError("Enter a valid verification code.");
+    return;
+  }
+
+  if (changePasswordNewPassword.length < 8) {
+    setChangePasswordError("New password must be at least 8 characters.");
+    return;
+  }
+
+  setChangePasswordSubmitting(true);
+  try {
+    const response = await fetch(`${AUTH_API_BASE_URL}/api/auth/reset-password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email,
+        resetToken: changePasswordToken.trim(),
+        newPassword: changePasswordNewPassword,
+      }),
+    });
+
+    const data = (await response.json()) as {
+      ok?: boolean;
+      code?: string;
+      message?: string;
+    };
+
+    if (!response.ok || !data.ok) {
+      if (data.code === "INVALID_RESET_TOKEN") {
+        throw new Error("Verification code is invalid or expired.");
+      }
+      throw new Error(data.message ?? "Unable to change password.");
+    }
+
+    // Force logout after password change
+    localStorage.removeItem(STORAGE_KEYS.authToken);
+    localStorage.removeItem(STORAGE_KEYS.authUser);
+    setCurrentUser(null);
+    setLocked(false);
+    setPinInput("");
+    setShowPremiumPanel(false);
+
+    setShowChangePasswordModal(false);
+    setChangePasswordStep("request");
+    setChangePasswordToken("");
+    setChangePasswordNewPassword("");
+    setChangePasswordInfo("");
+    setChangePasswordError("");
+    setToastMessage("Password updated. Please login again.");
+  } catch (error) {
+    setChangePasswordError(error instanceof Error ? error.message : "Unable to change password.");
+  } finally {
+    setChangePasswordSubmitting(false);
+  }
+};
 
 
   const handleForgotPasswordReset = async () => {
@@ -3137,21 +3260,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
                 </select>
 
                 <div className="grid grid-cols-3 gap-2">
-                  <select
-                    value={selectedPhoneCountry}
-                    onChange={(e) => setSelectedPhoneCountry(e.target.value)}
-                    className="col-span-1 rounded-lg border border-slate-700 bg-slate-950 px-2 py-2"
-                  >
-                    {PHONE_COUNTRIES_BY_REGION.map((group) => (
-                      <optgroup key={group.region} label={group.region}>
-                        {group.countries.map((country) => (
-                          <option key={country.code} value={country.code}>
-                            {countryFlag(country.code)} {country.name} ({country.dial})
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
+                  
                   <input
                     inputMode="numeric"
                     value={phoneLocalNumber}
@@ -5257,6 +5366,25 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
         {activeTab === "settings" && (
           <>
 
+          <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+  <h2 className="mb-3 text-lg font-semibold">Profile</h2>
+  <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-950 p-3 text-sm">
+    <p><span className="text-slate-400">Full name:</span> {currentUser.fullName || "-"}</p>
+    <p><span className="text-slate-400">Username:</span> {currentUser.username || "-"}</p>
+    <p><span className="text-slate-400">Email:</span> {currentUser.email || "-"}</p>
+    <p><span className="text-slate-400">Phone:</span> {currentUser.phoneNumber || "-"}</p>
+  </div>
+
+  <div className="mt-3 flex flex-wrap gap-2">
+    <button
+      onClick={openChangePasswordModal}
+      className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300 hover:bg-cyan-500/10"
+    >
+      Change password
+    </button>
+  </div>
+</section>
+
  {/* Subscription Status */}
                        {!IS_PLAYSTORE && (
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
@@ -5425,6 +5553,109 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
             </div>
           </div>
         )}
+
+        {showChangePasswordModal && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
+    <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-lg font-semibold text-cyan-300">Change Password</h3>
+        <button onClick={() => setShowChangePasswordModal(false)} className="text-xl text-slate-400 hover:text-white">✕</button>
+      </div>
+
+      <p className="mb-3 text-xs text-slate-400">
+        A verification code will be sent to your account email.
+      </p>
+
+      <div className="mb-3 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-300">
+        {currentUser.email}
+      </div>
+
+      {changePasswordStep === "request" ? (
+        <button
+          type="button"
+          onClick={() => void requestChangePasswordCode(false)}
+          disabled={changePasswordSubmitting}
+          className="w-full rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300 disabled:opacity-60"
+        >
+          {changePasswordSubmitting ? "Sending..." : "Send verification code"}
+        </button>
+      ) : (
+        <div className="space-y-2">
+          <div className="relative">
+            <input
+              type={showChangePasswordToken ? "text" : "password"}
+              value={changePasswordToken}
+              onChange={(e) => setChangePasswordToken(e.target.value)}
+              placeholder="Verification code"
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 pr-12 text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => setShowChangePasswordToken((prev) => !prev)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-300 hover:text-slate-100"
+            >
+              <EyeToggleIcon visible={showChangePasswordToken} />
+            </button>
+          </div>
+
+          <div className="relative">
+            <input
+              type={showChangePasswordNewPassword ? "text" : "password"}
+              value={changePasswordNewPassword}
+              onChange={(e) => setChangePasswordNewPassword(e.target.value)}
+              placeholder="New password"
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 pr-12 text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => setShowChangePasswordNewPassword((prev) => !prev)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-300 hover:text-slate-100"
+            >
+              <EyeToggleIcon visible={showChangePasswordNewPassword} />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void submitChangePasswordReset()}
+            disabled={changePasswordSubmitting}
+            className="w-full rounded-lg border border-emerald-500 px-3 py-2 text-sm text-emerald-300 disabled:opacity-60"
+          >
+            {changePasswordSubmitting ? "Updating..." : "Update password"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void requestChangePasswordCode(true)}
+            disabled={changePasswordSubmitting || changePasswordResendAvailableAt > changePasswordNow}
+            className="w-full rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300 disabled:opacity-60"
+          >
+            {changePasswordResendAvailableAt > changePasswordNow
+              ? `Resend code in ${Math.ceil((changePasswordResendAvailableAt - changePasswordNow) / 1000)}s`
+              : "Resend code"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setChangePasswordStep("request");
+              setChangePasswordToken("");
+              setChangePasswordNewPassword("");
+              setChangePasswordInfo("");
+              setChangePasswordError("");
+            }}
+            className="w-full rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-300"
+          >
+            Back
+          </button>
+        </div>
+      )}
+
+      {changePasswordError && <p className="mt-3 text-xs text-red-400">{changePasswordError}</p>}
+      {changePasswordInfo && <p className="mt-3 text-xs text-emerald-300">{changePasswordInfo}</p>}
+    </div>
+  </div>
+)}
 
                 {showLicenseModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
