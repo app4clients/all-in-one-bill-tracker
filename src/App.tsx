@@ -162,13 +162,25 @@ const STORAGE_KEYS = {
     dailyExpenses: "bill-tracker-daily-expenses",
 };
 
-const BUILD_VARIANT = (import.meta.env.VITE_BUILD_VARIANT as string | undefined) ?? "full";
+const BUILD_VARIANT = (import.meta.env.VITE_BUILD_VARIANT as string | undefined) ?? "direct";
+
 const IS_PLAYSTORE = BUILD_VARIANT === "playstore";
-const FREE_ITEM_LIMIT = IS_PLAYSTORE ? 5 : 8;
-const FREE_CATEGORY_LIMIT = IS_PLAYSTORE ? 2 : 3;
-const FREE_ACCOUNT_LIMIT = IS_PLAYSTORE ? 1 : 2;
-const FREE_SAVINGS_GOAL_LIMIT = IS_PLAYSTORE ? 0 : 1;
-const FREE_CATEGORY_LIMIT_COUNT = IS_PLAYSTORE ? 0 : 1;
+const IS_AMAZON = BUILD_VARIANT === "amazon";
+const IS_DIRECT = BUILD_VARIANT === "direct";
+
+/**
+ * Regle metier:
+ * - Play Store: masquer completement les sections premium (aucune trace d'upgrade/paiement)
+ * - Amazon/Direct: afficher sections premium, mais verrouillees si non premium
+ */
+const HIDE_PREMIUM_FEATURES = IS_PLAYSTORE;
+
+const FREE_ITEM_LIMIT = IS_PLAYSTORE ? 5 : IS_AMAZON ? 5 : 8;
+const FREE_CATEGORY_LIMIT = IS_PLAYSTORE ? 2 : IS_AMAZON ? 2 : 3;
+const FREE_ACCOUNT_LIMIT = IS_PLAYSTORE ? 1 : IS_AMAZON ? 1 : 2;
+const FREE_SAVINGS_GOAL_LIMIT = IS_PLAYSTORE ? 0 : IS_AMAZON ? 0 : 1;
+const FREE_CATEGORY_LIMIT_COUNT = IS_PLAYSTORE ? 0 : IS_AMAZON ? 0 : 1;
+
 const BILLING_BACKEND_URL = (import.meta.env.VITE_BILLING_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 const AUTH_API_BASE_URL = (import.meta.env.VITE_AUTH_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 const WEBSITE_PAYMENT_URL = IS_PLAYSTORE ? "https://app4clients.com/" : "https://app4clients.com/";
@@ -178,7 +190,11 @@ const RECOMMENDED_PRICES_USD = {
            yearly: 19.99,
          };
 
-const ANDROID_PACKAGE_NAME = "com.app4clients.allinonebilltracker";
+const ANDROID_PACKAGE_NAME = IS_PLAYSTORE
+  ? "com.app4clients.allinonebilltracker.play"
+  : IS_AMAZON
+    ? "com.app4clients.allinonebilltracker.amazon"
+    : "com.app4clients.allinonebilltracker.direct";
 
 function openWebsitePayment() {
   window.open(WEBSITE_PAYMENT_URL, "_blank");
@@ -476,6 +492,30 @@ function InfoModal({ title, children }: { title: string; children: React.ReactNo
 }
 
 export default function App() {
+const handleUpgrade = () => {
+  if (IS_PLAYSTORE) {
+    return;
+  }
+
+  // Toujours rediriger vers Settings d'abord
+  setActiveTab("settings");
+
+  if (IS_AMAZON) {
+    // Amazon: pas de Gumroad modal
+    setShowLicenseModal(false);
+    setShowPremiumPanel(false);
+    setToastMessage("Open Subscription Status to upgrade via Amazon.");
+    return;
+  }
+
+  if (IS_DIRECT) {
+    // APK direct: ouvrir modal licence Gumroad
+    setShowLicenseModal(true);
+    setShowPremiumPanel(false);
+    return;
+  }
+};
+
   const [showWelcomeSplash, setShowWelcomeSplash] = useState(true);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authLoading, setAuthLoading] = useState(true);
@@ -1000,7 +1040,7 @@ const refreshEntitlement = useCallback(async () => {
   } catch {
     setEntitlement({
       loading: false,
-      premiumActive: true,
+      premiumActive: false,
       productId: null,
       expiresAt: null,
       error: "Unable to refresh premium state from server.",
@@ -3599,12 +3639,18 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
                 🔒
               </button>
             )}
-            {canUsePremiumFeatures ? (
-  <span className="rounded-lg bg-amber-400/20 border border-amber-400/50 px-2 py-1 text-xs font-bold text-amber-300">💎 Premium</span>
-) : (
-  <span className="rounded-lg bg-slate-500/20 border border-slate-500/50 px-2 py-1 text-xs font-bold text-slate-300">🆓 Free</span>
+            {!HIDE_PREMIUM_FEATURES && (
+  <>
+    {canUsePremiumFeatures ? (
+      <span className="rounded-lg bg-amber-400/20 border border-amber-400/50 px-2 py-1 text-xs font-bold text-amber-300">💎 Premium</span>
+    ) : (
+      <span className="rounded-lg bg-slate-500/20 border border-slate-500/50 px-2 py-1 text-xs font-bold text-slate-300">🆓 Free</span>
+    )}
+    {IS_DIRECT && (
+  <button onClick={() => setShowLicenseModal(true)} className="rounded-lg border border-amber-500 px-3 py-2 text-sm text-amber-300 hover:bg-amber-500/10">🔑</button>
 )}
-<button onClick={() => setShowLicenseModal(true)} className="rounded-lg border border-amber-500 px-3 py-2 text-sm text-amber-300 hover:bg-amber-500/10">🔑</button>
+  </>
+)}
 
 
           </div>
@@ -3668,7 +3714,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
           <button type="button" onClick={() => void refreshExchangeRates()} className="ml-2 text-cyan-300">Refresh</button>
         </p>
 
-{showPremiumPanel && !IS_PLAYSTORE && (
+{showPremiumPanel && IS_DIRECT && (
   <section className="mb-6 rounded-xl border border-amber-500/40 bg-slate-900 p-4">
     <h2 className="text-lg font-semibold text-amber-300">💎 Upgrade to Premium</h2>
     <p className="mt-2 text-sm text-slate-300">
@@ -3770,10 +3816,32 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
               </div>
             </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button onClick={() => void refreshEntitlement()} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300">🔄 Check Premium Status</button>
-              <button onClick={() => setShowPremiumPanel(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Close</button>
-            </div>
+            {/* Bouton de vérification après achat */}
+<div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-950/20 p-3">
+  <p className="text-xs font-semibold text-emerald-300 mb-2">✅ Déjà acheté sur Gumroad ?</p>
+  <p className="text-xs text-slate-400 mb-3">Cliquez après votre paiement pour activer Premium instantanément (sans coller de clé).</p>
+  <button 
+    onClick={async () => {
+      setToastMessage("Vérification en cours...");
+      await refreshEntitlement();
+      if (entitlement.premiumActive) {
+        setToastMessage("🎉 Premium activé ! Merci pour votre achat !");
+        setShowPremiumPanel(false);
+      } else {
+        setToastMessage("Achat non détecté. Vérifiez votre email ou collez votre clé ci-dessous.");
+      }
+    }} 
+    disabled={entitlement.loading}
+    className="w-full rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-bold text-slate-950 hover:bg-emerald-400 disabled:opacity-60 active:scale-95 transition-all"
+  >
+    {entitlement.loading ? "Vérification..." : "✓ J'ai payé - Activer Premium"}
+  </button>
+</div>
+
+<div className="mt-3 flex flex-wrap gap-2">
+  <button onClick={() => void refreshEntitlement()} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300">🔄 Refresh</button>
+  <button onClick={() => setShowPremiumPanel(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Close</button>
+</div>
           </section>
         )}
 
@@ -4216,6 +4284,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
             </section>
 
             {/* Payment History */}
+            {!HIDE_PREMIUM_FEATURES && (
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
               <h2 className="mb-3 text-lg font-semibold flex items-center">
   📋 Payment History
@@ -4234,7 +4303,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
                   <p className="text-3xl">📋</p>
                   <p className="mt-2 text-sm font-semibold text-slate-300">Payment History</p>
                   <p className="mt-1 text-xs text-slate-400">Track all your past payments</p>
-                  <button onClick={() => setShowLicenseModal(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                  <button onClick={handleUpgrade} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
                 </div>
               ) : items.length === 0 ? (
 
@@ -4286,15 +4355,17 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
                 </div>
               )}
             </section>
+            )}
 
                         {/* Bill Splitter */}
+                        {!HIDE_PREMIUM_FEATURES && (
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
               {!canUsePremiumFeatures && (
                 <div className="py-6 text-center">
                   <p className="text-3xl">🔀</p>
                   <p className="mt-2 text-sm font-semibold text-slate-300">Bill Splitter</p>
                   <p className="mt-1 text-xs text-slate-400">Split bills easily with friends and family</p>
-                  <button onClick={() => setShowLicenseModal(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                  <button onClick={handleUpgrade} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
                 </div>
               )}
               <div className={canUsePremiumFeatures ? "" : "hidden"}>
@@ -4372,6 +4443,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
               )}
               </div>
             </section>
+            )}
 
             {/* Calendar */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
@@ -4453,7 +4525,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
         {activeTab === "analytics" && (
           <>
             {/* Income vs Expenses + 6 Month Trend */}
-            <section className="mb-6 grid gap-6 lg:grid-cols-2">
+            <section className={`mb-6 grid gap-6 ${!HIDE_PREMIUM_FEATURES ? "lg:grid-cols-2" : ""}`}>
               <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
                 <h2 className="mb-3 text-lg font-semibold flex items-center">
   📈 Income vs Expenses
@@ -4505,8 +4577,10 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
                 )}
               </div>
 
+ {!HIDE_PREMIUM_FEATURES && (
               <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
                 <h2 className="mb-3 text-lg font-semibold flex items-center">
+
   📉 6-Month Trend
   <InfoModal title="6-Month Trend">
     <p>Your <strong>spending over the last 6 months</strong>.</p>
@@ -4522,7 +4596,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
                     <p className="text-3xl">📉</p>
                     <p className="mt-2 text-sm font-semibold text-slate-300">6-Month Spending Trend</p>
                     <p className="mt-1 text-xs text-slate-400">See how your spending changes over time</p>
-                    <button onClick={() => setShowLicenseModal(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                    <button onClick={handleUpgrade} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
                   </div>
                 ) : last6MonthsTotals.every((m) => m.total === 0) ? (
                   <p className="text-sm text-slate-400">Trend data will appear after a few months.</p>
@@ -4545,6 +4619,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
                   </div>
                 )}
               </div>
+              )}
             </section>
 
             {/* AI Predictions */}
@@ -4626,116 +4701,135 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
                 )}
               </div>
 
-                            {/* Spending Heatmap */}
-              <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-                <h2 className="mb-3 text-lg font-semibold flex items-center">
-  🔥 Spending Heatmap
-  <InfoModal title="Spending Heatmap">
-    <p>A <strong>visual calendar</strong> showing your spending intensity this month.</p>
-    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li>🟩 <strong>Light</strong> — Low spending day</li>
-      <li>🟩 <strong>Dark</strong> — High spending day</li>
-      <li>⬜ <strong>Empty</strong> — No spending</li>
-      <li>🔵 <strong>Blue dot</strong> — Bills due</li>
-      <li>🟢 <strong>Green dot</strong> — Daily expenses logged</li>
-    </ul>
-    <p className="mt-2 text-amber-300">💡 Click on a day to see details!</p>
-  </InfoModal>
-</h2>
+{/* Spending Heatmap */}
+{!HIDE_PREMIUM_FEATURES && (
+  <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+    {!canUsePremiumFeatures ? (
+      <div className="py-6 text-center">
+        <p className="text-3xl">🔥</p>
+        <p className="mt-2 text-sm font-semibold text-slate-300">Spending Heatmap</p>
+        <p className="mt-1 text-xs text-slate-400">Visual calendar of your spending intensity</p>
+        <button
+          onClick={handleUpgrade}
+          className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition"
+        >
+          🔓 Unlock with Premium
+        </button>
+      </div>
+    ) : (
+      <>
+        <h2 className="mb-3 text-lg font-semibold flex items-center">
+          🔥 Spending Heatmap
+          <InfoModal title="Spending Heatmap">
+            <p>A <strong>visual calendar</strong> showing your spending intensity this month.</p>
+            <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+              <li>🟩 <strong>Light</strong> - Low spending day</li>
+              <li>🟩 <strong>Dark</strong> - High spending day</li>
+              <li>⬜ <strong>Empty</strong> - No spending</li>
+              <li>🔵 <strong>Blue dot</strong> - Bills due</li>
+              <li>🟢 <strong>Green dot</strong> - Daily expenses logged</li>
+            </ul>
+            <p className="mt-2 text-amber-300">💡 Click on a day to see details!</p>
+          </InfoModal>
+        </h2>
 
-                <div className="grid grid-cols-7 gap-1.5 text-center">
-                  {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => (
-                    <div key={d} className="py-1 text-xs font-medium text-slate-500">{d}</div>
-                  ))}
-                  {(() => {
-                    const now = new Date();
-                    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-                    const startPad = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
-                    const cells: React.ReactNode[] = [];
+        <div className="grid grid-cols-7 gap-1.5 text-center">
+          {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => (
+            <div key={d} className="py-1 text-xs font-medium text-slate-500">{d}</div>
+          ))}
+          {(() => {
+            const now = new Date();
+            const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+            const startPad = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
+            const cells: React.ReactNode[] = [];
 
-                    for (let i = 0; i < startPad; i++) {
-                      cells.push(<div key={`pad-${i}`} className="h-9" />);
-                    }
+            for (let i = 0; i < startPad; i++) {
+              cells.push(<div key={`pad-${i}`} className="h-9" />);
+            }
 
-                    heatmapData.days.forEach((d) => {
-                      const isToday = d.day === now.getDate();
-                      const isSelected = d.day === heatmapSelectedDay;
+            heatmapData.days.forEach((d) => {
+              const isToday = d.day === now.getDate();
+              const isSelected = d.day === heatmapSelectedDay;
 
-                      let bgColor = "bg-slate-800/30";
-                      if (d.intensity > 0) {
-                        if (d.intensity <= 0.25) bgColor = "bg-emerald-900/60";
-                        else if (d.intensity <= 0.5) bgColor = "bg-emerald-700/60";
-                        else if (d.intensity <= 0.75) bgColor = "bg-emerald-600/70";
-                        else bgColor = "bg-emerald-500/80";
-                      }
+              let bgColor = "bg-slate-800/30";
+              if (d.intensity > 0) {
+                if (d.intensity <= 0.25) bgColor = "bg-emerald-900/60";
+                else if (d.intensity <= 0.5) bgColor = "bg-emerald-700/60";
+                else if (d.intensity <= 0.75) bgColor = "bg-emerald-600/70";
+                else bgColor = "bg-emerald-500/80";
+              }
 
-                      cells.push(
-                        <button
-                          key={d.day}
-                          onClick={() => setHeatmapSelectedDay(heatmapSelectedDay === d.day ? null : d.day)}
-                          className={`relative flex h-9 items-center justify-center rounded-md text-xs transition-all ${bgColor} ${isSelected ? "ring-2 ring-cyan-400" : ""} ${isToday ? "font-bold text-white" : "text-slate-300"} hover:ring-1 hover:ring-cyan-400/50`}
-                        >
-                          {d.day}
-                          <div className="absolute bottom-0.5 left-1/2 flex -translate-x-1/2 gap-0.5">
-                            {d.hasBills && <span className="h-1 w-1 rounded-full bg-blue-400" />}
-                            {d.hasExpenses && <span className="h-1 w-1 rounded-full bg-emerald-300" />}
-                          </div>
-                        </button>
-                      );
-                    });
-
-                    return cells;
-                  })()}
-                </div>
-
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
-                  <div className="flex items-center gap-2">
-                    <span>Less</span>
-                    <span className="h-3 w-3 rounded-sm bg-slate-800/30" />
-                    <span className="h-3 w-3 rounded-sm bg-emerald-900/60" />
-                    <span className="h-3 w-3 rounded-sm bg-emerald-700/60" />
-                    <span className="h-3 w-3 rounded-sm bg-emerald-600/70" />
-                    <span className="h-3 w-3 rounded-sm bg-emerald-500/80" />
-                    <span>More</span>
+              cells.push(
+                <button
+                  key={d.day}
+                  onClick={() => setHeatmapSelectedDay(heatmapSelectedDay === d.day ? null : d.day)}
+                  className={`relative flex h-9 items-center justify-center rounded-md text-xs transition-all ${bgColor} ${isSelected ? "ring-2 ring-cyan-400" : ""} ${isToday ? "font-bold text-white" : "text-slate-300"} hover:ring-1 hover:ring-cyan-400/50`}
+                >
+                  {d.day}
+                  <div className="absolute bottom-0.5 left-1/2 flex -translate-x-1/2 gap-0.5">
+                    {d.hasBills && <span className="h-1 w-1 rounded-full bg-blue-400" />}
+                    {d.hasExpenses && <span className="h-1 w-1 rounded-full bg-emerald-300" />}
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-blue-400" /> Bills</span>
-                    <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> Expenses</span>
-                  </div>
-                </div>
+                </button>
+              );
+            });
 
-                {heatmapSelectedDay !== null && (() => {
-                  const dayData = heatmapData.days.find((d) => d.day === heatmapSelectedDay);
-                  if (!dayData || dayData.amount === 0) return (
-                    <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950 p-2 text-center">
-                      <p className="text-xs text-slate-500">No spending on day {heatmapSelectedDay}</p>
-                    </div>
-                  );
-                  return (
-                    <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-950/20 p-3">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium text-emerald-300">Day {heatmapSelectedDay}</p>
-                        <p className="text-sm font-bold text-emerald-400">{formatMoney(dayData.amount)}</p>
-                      </div>
-                      <div className="mt-1 flex gap-3 text-xs text-slate-400">
-                        {dayData.hasBills && <span>🔵 Bills due</span>}
-                        {dayData.hasExpenses && <span>🟢 Daily expenses</span>}
-                      </div>
-                    </div>
-                  );
-                })()}
+            return cells;
+          })()}
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
+          <div className="flex items-center gap-2">
+            <span>Less</span>
+            <span className="h-3 w-3 rounded-sm bg-slate-800/30" />
+            <span className="h-3 w-3 rounded-sm bg-emerald-900/60" />
+            <span className="h-3 w-3 rounded-sm bg-emerald-700/60" />
+            <span className="h-3 w-3 rounded-sm bg-emerald-600/70" />
+            <span className="h-3 w-3 rounded-sm bg-emerald-500/80" />
+            <span>More</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-blue-400" /> Bills</span>
+            <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> Expenses</span>
+          </div>
+        </div>
+
+        {heatmapSelectedDay !== null && (() => {
+          const dayData = heatmapData.days.find((d) => d.day === heatmapSelectedDay);
+          if (!dayData || dayData.amount === 0) return (
+            <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950 p-2 text-center">
+              <p className="text-xs text-slate-500">No spending on day {heatmapSelectedDay}</p>
+            </div>
+          );
+          return (
+            <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-950/20 p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-emerald-300">Day {heatmapSelectedDay}</p>
+                <p className="text-sm font-bold text-emerald-400">{formatMoney(dayData.amount)}</p>
               </div>
-
+              <div className="mt-1 flex gap-3 text-xs text-slate-400">
+                {dayData.hasBills && <span>🔵 Bills due</span>}
+                {dayData.hasExpenses && <span>🟢 Daily expenses</span>}
+              </div>
+            </div>
+          );
+        })()}
+      </>
+    )}
+  </div>
+)}
                             {/* Category Limits */}
+                            {!HIDE_PREMIUM_FEATURES && (
               <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
               {!canUsePremiumFeatures && (
                 <div className="py-6 text-center">
                   <p className="text-3xl">🏷️</p>
                   <p className="mt-2 text-sm font-semibold text-slate-300">Category Spending Limits</p>
                   <p className="mt-1 text-xs text-slate-400">Set spending caps per category</p>
-                  <button onClick={() => setShowLicenseModal(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                  <button onClick={handleUpgrade} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
                 </div>
               )}
+               
               <div className={canUsePremiumFeatures ? "" : "hidden"}>
                 <h2 className="mb-3 text-lg font-semibold flex items-center">
   🏷️ Category Spending Limits
@@ -4794,10 +4888,13 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
                   </div>
                 </div>
                             </div>
+                            
               </div>
+              )}
             </section>
 
             {/* Late Fee Calculator */}
+            {!HIDE_PREMIUM_FEATURES && (
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
               <h2 className="mb-3 text-lg font-semibold flex items-center">
   ⚠️ Late Fee Calculator
@@ -4816,7 +4913,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
                   <p className="text-3xl">⚠️</p>
                   <p className="mt-2 text-sm font-semibold text-slate-300">Late Fee Calculator</p>
                   <p className="mt-1 text-xs text-slate-400">Track potential late fees for overdue bills</p>
-                  <button onClick={() => setShowLicenseModal(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                  <button onClick={handleUpgrade} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
                 </div>
               ) : lateFeeRules.length === 0 ? (
 
@@ -4860,6 +4957,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
                 <button onClick={addLateFeeRule} className="rounded-lg bg-cyan-500 px-4 py-2 font-semibold text-slate-950">Add Rule</button>
               </div>
             </section>
+            )}
 
                         {/* Monthly Comparison */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
@@ -4972,56 +5070,117 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
             </section>
 
             {/* Accounts */}
-            <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-lg font-semibold flex items-center">
-  🏦 Accounts
-  <InfoModal title="Accounts">
-    <p>Your <strong>digital wallet</strong>. Add all your accounts with balances.</p>
-    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li>💵 <strong>Cash</strong> — Cash on hand</li>
-      <li>🏦 <strong>Bank</strong> — Bank accounts</li>
-      <li>💳 <strong>Card</strong> — Credit/debit cards</li>
-      <li>📱 <strong>Mobile</strong> — Mobile money</li>
-      <li>💰 <strong>Other</strong> — Crypto, etc.</li>
-    </ul>
-    <p className="mt-2 text-amber-300">💡 Click on the balance to update it!</p>
-  </InfoModal>
-</h2>
-                <div className="text-right">
-                  <p className="text-xs text-slate-400">Total Balance</p>
-                  <p className={`text-lg font-bold ${totalAccountBalance >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatMoney(totalAccountBalance)}</p>
+{!HIDE_PREMIUM_FEATURES && (
+  <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+    {!canUsePremiumFeatures ? (
+      <div className="py-6 text-center">
+        <p className="text-3xl">🏦</p>
+        <p className="mt-2 text-sm font-semibold text-slate-300">Accounts</p>
+        <p className="mt-1 text-xs text-slate-400">Track your account balances</p>
+        <button
+          onClick={handleUpgrade}
+          className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition"
+        >
+          🔓 Unlock with Premium
+        </button>
+      </div>
+    ) : (
+      <>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold flex items-center">
+            🏦 Accounts
+            <InfoModal title="Accounts">
+              <p>Your <strong>digital wallet</strong>. Add all your accounts with balances.</p>
+              <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+                <li>💵 <strong>Cash</strong> - Cash on hand</li>
+                <li>🏦 <strong>Bank</strong> - Bank accounts</li>
+                <li>💳 <strong>Card</strong> - Credit/debit cards</li>
+                <li>📱 <strong>Mobile</strong> - Mobile money</li>
+                <li>💰 <strong>Other</strong> - Crypto, etc.</li>
+              </ul>
+              <p className="mt-2 text-amber-300">💡 Click on the balance to update it!</p>
+            </InfoModal>
+          </h2>
+          <div className="text-right">
+            <p className="text-xs text-slate-400">Total Balance</p>
+            <p className={`text-lg font-bold ${totalAccountBalance >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              {formatMoney(totalAccountBalance)}
+            </p>
+          </div>
+        </div>
+
+        {accounts.length > 0 && (
+          <div className="space-y-2">
+            {accounts.map((acc) => {
+              const typeIcon = acc.type === "cash" ? "💵" : acc.type === "bank" ? "🏦" : acc.type === "card" ? "💳" : acc.type === "mobile" ? "📱" : "💰";
+              return (
+                <div key={acc.id} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950 p-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full text-lg" style={{ backgroundColor: acc.color + "30" }}>
+                      {typeIcon}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">{acc.name}</p>
+                      <p className="text-xs text-slate-400 capitalize">{acc.type}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => { setEditBalanceAccount(acc); setEditBalanceInput(fromUSD(acc.balance, currency, currencyToUSD).toFixed(2)); }}
+                      className={`text-sm font-bold ${acc.balance >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                    >
+                      {formatMoney(acc.balance)}
+                    </button>
+                    <button onClick={() => removeAccount(acc.id)} className="text-xs text-red-300 hover:text-red-200">✕</button>
+                  </div>
                 </div>
-              </div>
-              {accounts.length > 0 && (
-                <div className="space-y-2">
-                  {accounts.map((acc) => {
-                    const typeIcon = acc.type === "cash" ? "💵" : acc.type === "bank" ? "🏦" : acc.type === "card" ? "💳" : acc.type === "mobile" ? "📱" : "💰";
-                    return (
-                      <div key={acc.id} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950 p-3">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full text-lg" style={{ backgroundColor: acc.color + "30" }}>{typeIcon}</div>
-                          <div><p className="text-sm font-medium">{acc.name}</p><p className="text-xs text-slate-400 capitalize">{acc.type}</p></div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => { setEditBalanceAccount(acc); setEditBalanceInput(fromUSD(acc.balance, currency, currencyToUSD).toFixed(2)); }} className={`text-sm font-bold ${acc.balance >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatMoney(acc.balance)}</button>
-                          <button onClick={() => removeAccount(acc.id)} className="text-xs text-red-300 hover:text-red-200">✕</button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              <div className="mt-3 grid gap-2 border-t border-slate-800 pt-3 sm:grid-cols-5">
-                <input value={accountForm.name} onChange={(e) => setAccountForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Account name" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
-                <select value={accountForm.type} onChange={(e) => setAccountForm((prev) => ({ ...prev, type: e.target.value as Account["type"] }))} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
-                  <option value="cash">💵 Cash</option><option value="bank">🏦 Bank</option><option value="card">💳 Card</option><option value="mobile">📱 Mobile</option><option value="other">💰 Other</option>
-                </select>
-                <input type="number" min={0} step="0.01" value={accountForm.balance > 0 ? Number(fromUSD(accountForm.balance, currency, currencyToUSD).toFixed(2)) : ""} onChange={(e) => setAccountForm((prev) => ({ ...prev, balance: toUSD(Number(e.target.value || 0), currency, currencyToUSD) }))} placeholder={`Balance (${currency})`} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" />
-                <div className="flex items-center gap-2"><label className="text-xs text-slate-400">Color</label><input type="color" value={accountForm.color} onChange={(e) => setAccountForm((prev) => ({ ...prev, color: e.target.value }))} className="h-9 w-9 cursor-pointer rounded border border-slate-700" /></div>
-                <button onClick={addAccount} className="rounded-lg bg-cyan-500 px-4 py-2 font-semibold text-slate-950">Add</button>
-              </div>
-            </section>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="mt-3 grid gap-2 border-t border-slate-800 pt-3 sm:grid-cols-5">
+          <input
+            value={accountForm.name}
+            onChange={(e) => setAccountForm((prev) => ({ ...prev, name: e.target.value }))}
+            placeholder="Account name"
+            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+          />
+          <select
+            value={accountForm.type}
+            onChange={(e) => setAccountForm((prev) => ({ ...prev, type: e.target.value as Account["type"] }))}
+            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+          >
+            <option value="cash">💵 Cash</option>
+            <option value="bank">🏦 Bank</option>
+            <option value="card">💳 Card</option>
+            <option value="mobile">📱 Mobile</option>
+            <option value="other">💰 Other</option>
+          </select>
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={accountForm.balance > 0 ? Number(fromUSD(accountForm.balance, currency, currencyToUSD).toFixed(2)) : ""}
+            onChange={(e) => setAccountForm((prev) => ({ ...prev, balance: toUSD(Number(e.target.value || 0), currency, currencyToUSD) }))}
+            placeholder={`Balance (${currency})`}
+            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+          />
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-400">Color</label>
+            <input
+              type="color"
+              value={accountForm.color}
+              onChange={(e) => setAccountForm((prev) => ({ ...prev, color: e.target.value }))}
+              className="h-9 w-9 cursor-pointer rounded border border-slate-700"
+            />
+          </div>
+          <button onClick={addAccount} className="rounded-lg bg-cyan-500 px-4 py-2 font-semibold text-slate-950">Add</button>
+        </div>
+      </>
+    )}
+  </section>
+)}
 
             {/* Budget Guard + Savings Goals */}
             <section className="mb-6 grid gap-6 lg:grid-cols-2">
@@ -5104,6 +5263,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
             </section>
 
                         {/* Savings Projections */}
+                        {!HIDE_PREMIUM_FEATURES && (
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
               <h2 className="mb-3 text-lg font-semibold flex items-center">
   📈 Savings Projections
@@ -5122,7 +5282,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
                   <p className="text-3xl">📈</p>
                   <p className="mt-2 text-sm font-semibold text-slate-300">Savings Projections</p>
                   <p className="mt-1 text-xs text-slate-400">See how much to save per month to reach your goals</p>
-                  <button onClick={() => setShowLicenseModal(true)} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
+                  <button onClick={handleUpgrade} className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition">🔓 Unlock with Premium</button>
                 </div>
               ) : savingsGoals.length === 0 ? (
 
@@ -5219,6 +5379,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
                 </div>
               )}
             </section>
+            )}
 
 {/* Daily Expense Tracker */}
             <section className="mb-6 rounded-xl border border-emerald-500/30 bg-slate-900 p-4">
@@ -5313,51 +5474,72 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
               )}
             </section>
 
-            {/* Achievements Preview */}
-            <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold flex items-center">
-  🏆 Achievements
-  <InfoModal title="Achievements">
-    <p><strong>Earn badges</strong> by using the app! Achievements unlock automatically.</p>
-    <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
-      <li>🎯 Add your first bill</li>
-      <li>✅ Pay all bills in a month</li>
-      <li>🐷 Save 20%+ of income</li>
-      <li>📋 Set a budget</li>
-      <li>💯 Reach 80+ health score</li>
-      <li>🏦 Add an account</li>
-      <li>And many more!</li>
-    </ul>
-    <p className="mt-2 text-amber-300">💡 Keep using the app to unlock all achievements!</p>
-  </InfoModal>
-</h2>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-slate-400">{achievements.length} unlocked</span>
-                  <button onClick={() => setShowAchievements((prev) => !prev)} className="rounded-lg border border-cyan-500 px-3 py-1.5 text-xs text-cyan-300 hover:bg-cyan-500/20">
-                    {showAchievements ? "Hide" : "View All"}
-                  </button>
-                </div>
-              </div>
+          {/* Achievements Preview */}
+{!HIDE_PREMIUM_FEATURES && (
+  <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+    {!canUsePremiumFeatures ? (
+      <div className="py-6 text-center">
+        <p className="text-3xl">🏆</p>
+        <p className="mt-2 text-sm font-semibold text-slate-300">Achievements</p>
+        <p className="mt-1 text-xs text-slate-400">Unlock badges by using the app</p>
+        <button
+          onClick={handleUpgrade}
+          className="mt-3 rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-300 transition"
+        >
+          🔓 Unlock with Premium
+        </button>
+      </div>
+    ) : (
+      <>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold flex items-center">
+            🏆 Achievements
+            <InfoModal title="Achievements">
+              <p><strong>Earn badges</strong> by using the app! Achievements unlock automatically.</p>
+              <ul className="mt-1 list-disc list-inside space-y-0.5 text-slate-400">
+                <li>🎯 Add your first bill</li>
+                <li>✅ Pay all bills in a month</li>
+                <li>🐷 Save 20%+ of income</li>
+                <li>📋 Set a budget</li>
+                <li>💯 Reach 80+ health score</li>
+                <li>🏦 Add an account</li>
+                <li>And many more!</li>
+              </ul>
+              <p className="mt-2 text-amber-300">💡 Keep using the app to unlock all achievements!</p>
+            </InfoModal>
+          </h2>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-400">{achievements.length} unlocked</span>
+            <button
+              onClick={() => setShowAchievements((prev) => !prev)}
+              className="rounded-lg border border-cyan-500 px-3 py-1.5 text-xs text-cyan-300 hover:bg-cyan-500/20"
+            >
+              {showAchievements ? "Hide" : "View All"}
+            </button>
+          </div>
+        </div>
 
-              {achievements.length === 0 ? (
-                <div className="py-4 text-center">
-                  <p className="text-3xl">🏆</p>
-                  <p className="mt-2 text-sm text-slate-400">Start using the app to earn achievements!</p>
-                  <p className="text-xs text-slate-500 mt-1">Add bills, pay on time, save money...</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-                  {achievements.slice(0, showAchievements ? 50 : 5).map((ach) => (
-                    <div key={ach.id} className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-center">
-                      <p className="text-2xl">{ach.icon}</p>
-                      <p className="text-xs font-medium text-amber-200 mt-1">{ach.title}</p>
-                      <p className="text-[10px] text-slate-500">{new Date(ach.unlockedAt).toLocaleDateString()}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
+        {achievements.length === 0 ? (
+          <div className="py-4 text-center">
+            <p className="text-3xl">🏆</p>
+            <p className="mt-2 text-sm text-slate-400">Start using the app to earn achievements!</p>
+            <p className="mt-1 text-xs text-slate-500">Add bills, pay on time, save money...</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+            {achievements.slice(0, showAchievements ? 50 : 5).map((ach) => (
+              <div key={ach.id} className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-center">
+                <p className="text-2xl">{ach.icon}</p>
+                <p className="mt-1 text-xs font-medium text-amber-200">{ach.title}</p>
+                <p className="text-[10px] text-slate-500">{new Date(ach.unlockedAt).toLocaleDateString()}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </>
+    )}
+  </section>
+)}
 
           </>
         )}
@@ -5385,27 +5567,60 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
   </div>
 </section>
 
- {/* Subscription Status */}
-                       {!IS_PLAYSTORE && (
-            <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
-              <h2 className="text-lg font-semibold">Subscription Status</h2>
-              <p className="mt-2 text-sm text-slate-300">Status: {entitlement.loading ? "Checking" : canUsePremiumFeatures ? "Premium active" : "Free plan"}{entitlement.productId ? ` · ${entitlement.productId}` : ""}{entitlement.expiresAt ? ` · Renewal ${new Date(entitlement.expiresAt).toLocaleDateString()}` : ""}</p>
-              {entitlement.error && <p className="mt-1 text-xs text-red-300">{entitlement.error}</p>}
-              <div className="mt-3 flex flex-wrap gap-2">
-                                {!IS_PLAYSTORE && (
-                  <button
-                    onClick={() => window.open(GUMROAD_PRODUCT_URL, "_blank")}
-                    className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300"
-                  >
-                    Manage Subscription (Gumroad)
-                  </button>
-                )}
-                <button onClick={() => void refreshEntitlement()} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300">Refresh</button>
-                {!IS_PLAYSTORE && !canUsePremiumFeatures && <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950">Upgrade</button>}
-{!IS_PLAYSTORE && <button onClick={() => setShowPremiumPanel((prev) => !prev)} className="rounded-lg border border-amber-500 px-3 py-2 text-sm text-amber-300">🔑 Enter License</button>}
-              </div>
-            </section>
-            )}
+ {/* Subscription Status - Amazon */}
+{IS_AMAZON && (
+  <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <h2 className="text-lg font-semibold">Subscription Status</h2>
+    <p className="mt-2 text-sm text-slate-300">
+      Status: {entitlement.loading ? "Checking" : canUsePremiumFeatures ? "Premium active" : "Free plan"}
+      {entitlement.productId ? ` · ${entitlement.productId}` : ""}
+      {entitlement.expiresAt ? ` · Renewal ${new Date(entitlement.expiresAt).toLocaleDateString()}` : ""}
+    </p>
+    {entitlement.error && <p className="mt-1 text-xs text-red-300">{entitlement.error}</p>}
+    <div className="mt-3 flex flex-wrap gap-2">
+      <button onClick={() => void refreshEntitlement()} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300">
+        Refresh
+      </button>
+      {!canUsePremiumFeatures && (
+        <button onClick={handleUpgrade} className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950">
+          Upgrade
+        </button>
+      )}
+    </div>
+  </section>
+)}
+
+{/* Subscription Status - Web */}
+{IS_DIRECT && (
+  <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
+    <h2 className="text-lg font-semibold">Subscription Status</h2>
+    <p className="mt-2 text-sm text-slate-300">
+      Status: {entitlement.loading ? "Checking" : canUsePremiumFeatures ? "Premium active" : "Free plan"}
+      {entitlement.productId ? ` · ${entitlement.productId}` : ""}
+      {entitlement.expiresAt ? ` · Renewal ${new Date(entitlement.expiresAt).toLocaleDateString()}` : ""}
+    </p>
+    {entitlement.error && <p className="mt-1 text-xs text-red-300">{entitlement.error}</p>}
+    <div className="mt-3 flex flex-wrap gap-2">
+      <button
+        onClick={() => window.open(GUMROAD_PRODUCT_URL, "_blank")}
+        className="rounded-lg border border-violet-500 px-3 py-2 text-sm text-violet-300"
+      >
+        Manage Subscription (Gumroad)
+      </button>
+      <button onClick={() => void refreshEntitlement()} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300">
+        Refresh
+      </button>
+      {!canUsePremiumFeatures && (
+        <button onClick={() => setShowPremiumPanel(true)} className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950">
+          Upgrade
+        </button>
+      )}
+      <button onClick={() => setShowPremiumPanel((prev) => !prev)} className="rounded-lg border border-amber-500 px-3 py-2 text-sm text-amber-300">
+        Enter License
+      </button>
+    </div>
+  </section>
+)}
 
             {/* Preferences */}
             <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-4">
@@ -5489,8 +5704,9 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
                     
                                         {!IS_PLAYSTORE && <button onClick={() => setShowLegal(true)} className="rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-200">Privacy & Terms</button>}
 
-<button onClick={() => setShowLicenseModal(true)} className="rounded-lg border border-amber-500 px-3 py-2 text-sm text-amber-300">🔑 License</button>
-
+{IS_DIRECT && (
+  <button onClick={() => setShowLicenseModal(true)} className="rounded-lg border border-amber-500 px-3 py-2 text-sm text-amber-300">🔑 License</button>
+)}
 <button onClick={handleLogout} className="rounded-lg border border-red-500 px-3 py-2 text-sm text-red-300">🚪 Log out</button>
 
                     <button onClick={() => setShowDeleteAccountDialog(true)} className="rounded-lg border border-red-500 px-3 py-2 text-sm text-red-300">Delete account</button>
@@ -5657,7 +5873,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
   </div>
 )}
 
-                {showLicenseModal && (
+                {showLicenseModal && IS_DIRECT && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
             <div className="w-full max-w-md rounded-xl border border-amber-500/40 bg-slate-900 p-5">
               <div className="flex items-center justify-between mb-3">

@@ -18,12 +18,40 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 6
-        versionName "3.5"
+        versionName "3.7"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+
+flavorDimensions "store"
+
+productFlavors {
+    playstore {
+        dimension "store"
+        applicationId "com.app4clients.allinonebilltracker.play"
+        versionNameSuffix "-play"
+    }
+    amazon {
+        dimension "store"
+        applicationId "com.app4clients.allinonebilltracker.amazon"
+        versionNameSuffix "-amazon"
+    }
+    direct {
+        dimension "store"
+        applicationId "com.app4clients.allinonebilltracker.direct"
+        versionNameSuffix "-direct"
+    }
+}
+
+applicationVariants.all { variant ->
+    variant.outputs.all { output ->
+        def flavor = variant.flavorName
+        def buildType = variant.buildType.name
+        outputFileName = "billtracker-${flavor}-${buildType}-v${variant.versionName}.apk"
+    }
+}
 
     signingConfigs {
         release {
