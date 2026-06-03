@@ -1,4 +1,5 @@
 import React, { useCallback, FormEvent, useEffect, useMemo, useState } from "react";
+import { AmazonIap, AMAZON_SKUS } from "./services/amazonIap";
 
 type ItemType = "bill" | "subscription";
 type StatusFilter = "all" | "dueSoon" | "paid" | "unpaid";
@@ -166,6 +167,7 @@ const BUILD_VARIANT = (import.meta.env.VITE_BUILD_VARIANT as string | undefined)
 
 const IS_PLAYSTORE = BUILD_VARIANT === "playstore";
 const IS_AMAZON = BUILD_VARIANT === "amazon";
+const AMAZON_IAP_LIVE = false; // false = coming soon, true = achat actif
 const IS_DIRECT = BUILD_VARIANT === "direct";
 
 /**
@@ -501,12 +503,15 @@ const handleUpgrade = () => {
   setActiveTab("settings");
 
   if (IS_AMAZON) {
-    // Amazon: pas de Gumroad modal
-    setShowLicenseModal(false);
-    setShowPremiumPanel(false);
-    setToastMessage("Open Subscription Status to upgrade via Amazon.");
-    return;
-  }
+  setShowLicenseModal(false);
+  setShowPremiumPanel(false);
+  setToastMessage(
+    AMAZON_IAP_LIVE
+      ? "Open Subscription Status to upgrade via Amazon."
+      : "Amazon subscription checkout will be enabled very soon."
+  );
+  return;
+}
 
   if (IS_DIRECT) {
     // APK direct: ouvrir modal licence Gumroad
@@ -707,6 +712,7 @@ premiumActive: false,
     error: "",
   });
 
+  const [amazonBuying, setAmazonBuying] = useState<null | "monthly" | "yearly">(null);
     const [licenseKey, setLicenseKey] = useState("");
   const [licenseEmail, setLicenseEmail] = useState("");
   const [licenseActivating, setLicenseActivating] = useState(false);
@@ -1047,6 +1053,134 @@ const refreshEntitlement = useCallback(async () => {
     });
   }
 }, [appUserId]);
+
+
+const startAmazonPurchase = useCallback(async (plan: "monthly" | "yearly") => {
+  if (!IS_AMAZON) return;
+  if (!AMAZON_IAP_LIVE) {
+    setToastMessage("Amazon subscription checkout is temporarily unavailable.");
+    return;
+  }
+
+  const sku = plan === "monthly" ? AMAZON_SKUS.monthly : AMAZON_SKUS.yearly;
+  try {
+    setAmazonBuying(plan);
+    await AmazonIap.purchase({ sku });
+    setToastMessage("Purchase flow opened. Complete it in Amazon dialog.");
+  } catch (error) {
+    setAmazonBuying(null);
+    setToastMessage(error instanceof Error ? error.message : "Unable to start Amazon purchase.");
+  }
+}, [AMAZON_IAP_LIVE]);
+
+
+useEffect(() => {
+  if (!IS_AMAZON || !appUserId || !AMAZON_IAP_LIVE) return;
+
+  let productListener: { remove: () => Promise<void> } | null = null;
+  let purchaseListener: { remove: () => Promise<void> } | null = null;
+  let restoreListener: { remove: () => Promise<void> } | null = null;
+
+  const setupAmazonIap = async () => {
+    try {
+      productListener = await AmazonIap.addListener("productDataResponse", (event) => {
+        if (event.status !== "SUCCESSFUL") {
+          setToastMessage(`Amazon products unavailable (${event.status}).`);
+          return;
+        }
+      });
+
+      purchaseListener = await AmazonIap.addListener("purchaseResponse", async (event) => {
+        if (event.status === "SUCCESSFUL" && event.receipt) {
+          try {
+            if (!BILLING_BACKEND_URL) {
+              throw new Error("Billing API is not configured.");
+            }
+
+            const response = await fetch(
+              `${BILLING_BACKEND_URL}/api/billing/entitlement-amazon/${encodeURIComponent(appUserId)}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  receipt: event.receipt,
+                  sku: event.receipt.sku,
+                  userId: event.userId ?? null,
+                  marketplace: event.marketplace ?? null,
+                }),
+              },
+            );
+
+            const data = await response.json();
+            if (!response.ok || !data?.ok) {
+              throw new Error(data?.message ?? "Entitlement update failed.");
+            }
+
+            await refreshEntitlement();
+            setToastMessage("Premium activated via Amazon!");
+          } catch (error) {
+            setToastMessage(error instanceof Error ? error.message : "Purchase verified but activation failed.");
+          } finally {
+            setAmazonBuying(null);
+          }
+          return;
+        }
+
+        if (event.status === "ALREADY_PURCHASED") {
+          void refreshEntitlement();
+          setToastMessage("Subscription already active.");
+          setAmazonBuying(null);
+          return;
+        }
+
+        if (event.status === "INVALID_SKU") {
+          setToastMessage("Invalid Amazon SKU configuration.");
+          setAmazonBuying(null);
+          return;
+        }
+
+        if (event.status === "FAILED") {
+          setToastMessage("Amazon purchase failed.");
+          setAmazonBuying(null);
+          return;
+        }
+
+        if (event.status === "NOT_SUPPORTED") {
+          setToastMessage("Amazon IAP not supported on this device.");
+          setAmazonBuying(null);
+          return;
+        }
+
+        if (event.status === "PENDING") {
+          setToastMessage("Purchase pending approval.");
+          return;
+        }
+
+        setToastMessage(`Purchase status: ${event.status}`);
+        setAmazonBuying(null);
+      });
+
+      restoreListener = await AmazonIap.addListener("purchaseUpdatesResponse", async (event) => {
+        if (event.status === "SUCCESSFUL") {
+          await refreshEntitlement();
+        }
+      });
+
+      await AmazonIap.getProducts({ skus: [AMAZON_SKUS.monthly, AMAZON_SKUS.yearly] });
+      await AmazonIap.restorePurchases();
+    } catch (error) {
+      setToastMessage(error instanceof Error ? error.message : "Amazon IAP init failed.");
+    }
+  };
+
+  void setupAmazonIap();
+
+  return () => {
+    if (productListener) void productListener.remove();
+    if (purchaseListener) void purchaseListener.remove();
+    if (restoreListener) void restoreListener.remove();
+  };
+}, [appUserId, refreshEntitlement]);
 
 useEffect(() => {
   void refreshEntitlement();
@@ -5581,11 +5715,37 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
       <button onClick={() => void refreshEntitlement()} className="rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-300">
         Refresh
       </button>
+
       {!canUsePremiumFeatures && (
-        <button onClick={handleUpgrade} className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950">
-          Upgrade
-        </button>
-      )}
+  <>
+    {!AMAZON_IAP_LIVE && (
+      <p className="mt-1 text-xs text-amber-300">
+        Amazon subscription checkout is temporarily unavailable and will be enabled in the next update.
+      </p>
+    )}
+
+    <button
+      onClick={() => void startAmazonPurchase("monthly")}
+      disabled={amazonBuying !== null || !AMAZON_IAP_LIVE}
+      className="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950 disabled:opacity-60"
+    >
+      {AMAZON_IAP_LIVE
+        ? (amazonBuying === "monthly" ? "Opening..." : "Buy Monthly ($2.99)")
+        : "Monthly (Coming soon)"}
+    </button>
+
+    <button
+      onClick={() => void startAmazonPurchase("yearly")}
+      disabled={amazonBuying !== null || !AMAZON_IAP_LIVE}
+      className="rounded-lg border border-amber-500 px-3 py-2 text-sm text-amber-300 disabled:opacity-60"
+    >
+      {AMAZON_IAP_LIVE
+        ? (amazonBuying === "yearly" ? "Opening..." : "Buy Yearly ($19.99)")
+        : "Yearly (Coming soon)"}
+    </button>
+  </>
+)}
+
     </div>
   </section>
 )}

@@ -18,7 +18,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 6
-        versionName "3.7"
+        versionName "3.7.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
@@ -99,6 +99,9 @@ dependencies {
         exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk7"
         exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk8"
     }
+
+    // Amazon Appstore SDK (Option A Maven)
+    amazonImplementation "com.amazon.device:amazon-appstore-sdk:3.0.+"
 
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
