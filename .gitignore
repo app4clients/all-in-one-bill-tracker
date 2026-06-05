@@ -17,3 +17,8 @@ yarn-debug.log*
 *.log
 keystore.properties
 *.jks
+
+.env.full
+.env.production
+.env.amazon
+.env.direct
