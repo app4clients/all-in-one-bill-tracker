@@ -4,12 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-        "build": "vite build",
-    "build:playstore": "cp .env.playstore .env && vite build",
-    "build:full": "cp .env.full .env && vite build",
-    "preview": "vite preview"
-  },
+  "dev": "vite",
+  "build": "vite build",
+  "build:playstore": "vite build --mode playstore",
+  "build:amazon": "vite build --mode amazon",
+  "build:direct": "vite build --mode direct",
+  "preview": "vite preview"
+},
   "dependencies": {
     "@capacitor/android": "^8.3.0",
     "@capacitor/assets": "^3.0.5",

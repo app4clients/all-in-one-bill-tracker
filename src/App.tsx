@@ -599,7 +599,7 @@ const handleUpgrade = () => {
 
       // ===== Force cache clear on every new build =====
   useEffect(() => {
-    const BUILD_VERSION = "4.0";
+    const BUILD_VERSION = "4.1";
     const savedVersion = localStorage.getItem("app-build-version");
 
     if (savedVersion === null) {
