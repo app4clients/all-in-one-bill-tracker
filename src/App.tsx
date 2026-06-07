@@ -169,13 +169,11 @@ const IS_PLAYSTORE = BUILD_VARIANT === "playstore";
 const IS_AMAZON = BUILD_VARIANT === "amazon";
 const AMAZON_IAP_LIVE = false; // false = coming soon, true = achat actif
 const IS_DIRECT = BUILD_VARIANT === "direct";
+const IS_HUAWEI = BUILD_VARIANT === "huawei";
 
-/**
- * Regle metier:
- * - Play Store: masquer completement les sections premium (aucune trace d'upgrade/paiement)
- * - Amazon/Direct: afficher sections premium, mais verrouillees si non premium
- */
-const HIDE_PREMIUM_FEATURES = IS_PLAYSTORE;
+
+const HIDE_PREMIUM_FEATURES = IS_PLAYSTORE || IS_HUAWEI;
+
 
 const FREE_ITEM_LIMIT = IS_PLAYSTORE ? 5 : IS_AMAZON ? 5 : 8;
 const FREE_CATEGORY_LIMIT = IS_PLAYSTORE ? 2 : IS_AMAZON ? 2 : 3;
@@ -192,11 +190,14 @@ const RECOMMENDED_PRICES_USD = {
            yearly: 19.99,
          };
 
-const ANDROID_PACKAGE_NAME = IS_PLAYSTORE
+
+    const ANDROID_PACKAGE_NAME = IS_PLAYSTORE
   ? "com.app4clients.allinonebilltracker.play"
   : IS_AMAZON
     ? "com.app4clients.allinonebilltracker.amazon"
-    : "com.app4clients.allinonebilltracker.direct";
+    : IS_HUAWEI
+      ? "com.app4clients.allinonebilltracker.huawei"
+      : "com.app4clients.allinonebilltracker.direct";
 
 function openWebsitePayment() {
   window.open(WEBSITE_PAYMENT_URL, "_blank");

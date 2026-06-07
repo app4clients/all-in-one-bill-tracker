@@ -43,6 +43,11 @@ productFlavors {
         applicationId "com.app4clients.allinonebilltracker.direct"
         versionNameSuffix "-direct"
     }
+    huawei {
+        dimension "store"
+        applicationId "com.app4clients.allinonebilltracker.huawei"
+        versionNameSuffix "-huawei"
+    }
 }
 
 applicationVariants.all { variant ->
