@@ -139,6 +139,7 @@ type ReminderSettings = {
 };
 
 const STORAGE_KEYS = {
+  privacyConsentAccepted: "bill-tracker-privacy-consent-accepted",
   authToken: "bill-tracker-auth-token",
   authUser: "bill-tracker-auth-user",
   items: "bill-tracker-items",
@@ -185,6 +186,7 @@ const BILLING_BACKEND_URL = (import.meta.env.VITE_BILLING_API_BASE_URL as string
 const AUTH_API_BASE_URL = (import.meta.env.VITE_AUTH_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 const WEBSITE_PAYMENT_URL = IS_PLAYSTORE ? "https://app4clients.com/" : "https://app4clients.com/";
 const GUMROAD_PRODUCT_URL = "https://app4clients.gumroad.com/l/mazfe";
+const PRIVACY_POLICY_URL = "https://app4clients.com/privacy-policy.html";
 const RECOMMENDED_PRICES_USD = {
            monthly: 2.99,
            yearly: 19.99,
@@ -583,6 +585,11 @@ const handleUpgrade = () => {
   const [newPin, setNewPin] = useState("");
   const [locked, setLocked] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
+  const [privacyConsentAccepted, setPrivacyConsentAccepted] = useState(() => {
+  return localStorage.getItem(STORAGE_KEYS.privacyConsentAccepted) === "true";
+});
+const [privacyConsentChecked, setPrivacyConsentChecked] = useState(false);
+const [showPrivacyConsentModal, setShowPrivacyConsentModal] = useState(false);
   const [notifEnabled, setNotifEnabled] = useState(false);
 
   useEffect(() => {
@@ -1364,6 +1371,12 @@ useEffect(() => {
     const timeout = window.setTimeout(() => setShowWelcomeSplash(false), 1800);
     return () => window.clearTimeout(timeout);
   }, []);
+
+  useEffect(() => {
+  if (!showWelcomeSplash && !authLoading && !privacyConsentAccepted) {
+    setShowPrivacyConsentModal(true);
+  }
+}, [showWelcomeSplash, authLoading, privacyConsentAccepted]);
 
 const formatMoney = useCallback((amountMAD: number) => {
     const noDecimal = currency === "JPY" || currency === "KRW";
@@ -3335,6 +3348,64 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
       setVerificationSubmitting(false);
     }
   };
+
+  const handleAcceptPrivacyConsent = () => {
+  if (!privacyConsentChecked) {
+    setToastMessage("Please read and accept the Privacy Policy.");
+    return;
+  }
+  localStorage.setItem(STORAGE_KEYS.privacyConsentAccepted, "true");
+  setPrivacyConsentAccepted(true);
+  setShowPrivacyConsentModal(false);
+  setPrivacyConsentChecked(false);
+};
+
+const renderPrivacyConsentModal = () => {
+  if (!showPrivacyConsentModal) return null;
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4">
+      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5 text-slate-100">
+        <h3 className="text-lg font-semibold text-cyan-300">Privacy Policy</h3>
+        <p className="mt-2 text-sm text-slate-300">
+          Please read and accept our Privacy Policy before using the app.
+        </p>
+        <ul className="mt-3 space-y-1 text-xs text-slate-400">
+          <li>- We collect account and finance data to provide app functionality.</li>
+          <li>- We do not sell your personal data.</li>
+          <li>- You can delete your account and data from Settings.</li>
+        </ul>
+
+        <a
+          href={PRIVACY_POLICY_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-3 inline-block text-xs text-cyan-300 underline"
+        >
+          Open full Privacy Policy
+        </a>
+
+        <label className="mt-4 flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={privacyConsentChecked}
+            onChange={(e) => setPrivacyConsentChecked(e.target.checked)}
+            className="mt-0.5 h-4 w-4"
+          />
+          <span>I have read and agree to the Privacy Policy.</span>
+        </label>
+
+        <button
+          type="button"
+          onClick={handleAcceptPrivacyConsent}
+          className="mt-4 w-full rounded-lg bg-cyan-500 px-4 py-2 font-semibold text-slate-950"
+        >
+          Continue
+        </button>
+      </div>
+    </div>
+  );
+};
   
   if (showWelcomeSplash) {
     return (
@@ -3615,6 +3686,12 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
               {authSubmitting ? "Please wait..." : authMode === "signup" ? "Create account" : "Login"}
             </button>
           </form>
+          <p className="mt-3 text-center text-xs text-slate-400">
+  By continuing, you agree to the{" "}
+  <a href={PRIVACY_POLICY_URL} target="_blank" rel="noreferrer" className="text-cyan-300 underline">
+    Privacy Policy
+  </a>.
+</p>
 
           {verificationEmail && (
             <form onSubmit={handleVerifyEmail} className="mt-4 space-y-2 rounded-lg border border-violet-600/40 bg-slate-950/70 p-3">
@@ -3656,6 +3733,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
             </form>
           )}
         </div>
+        {renderPrivacyConsentModal()}
       </div>
     );
   }
@@ -3705,6 +3783,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
             Unlock
           </button>
         </div>
+        {renderPrivacyConsentModal()}
       </div>
     );
   }
@@ -3716,6 +3795,7 @@ const handleVerifyEmail = async (event: FormEvent<HTMLFormElement>) => {
           {toastMessage}
         </div>
       )}
+      {renderPrivacyConsentModal()}
 
       <div className="mx-auto max-w-6xl p-4 sm:p-6">
         {/* ===== HEADER ===== */}
