@@ -607,7 +607,7 @@ const [showPrivacyConsentModal, setShowPrivacyConsentModal] = useState(false);
 
       // ===== Force cache clear on every new build =====
   useEffect(() => {
-    const BUILD_VERSION = "4.1";
+    const BUILD_VERSION = "4.2";
     const savedVersion = localStorage.getItem("app-build-version");
 
     if (savedVersion === null) {
