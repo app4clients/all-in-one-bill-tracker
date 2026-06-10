@@ -168,7 +168,7 @@ const BUILD_VARIANT = (import.meta.env.VITE_BUILD_VARIANT as string | undefined)
 
 const IS_PLAYSTORE = BUILD_VARIANT === "playstore";
 const IS_AMAZON = BUILD_VARIANT === "amazon";
-const AMAZON_IAP_LIVE = false; // false = coming soon, true = achat actif
+const AMAZON_IAP_LIVE = true; // false = coming soon, true = achat actif
 const IS_DIRECT = BUILD_VARIANT === "direct";
 const IS_HUAWEI = BUILD_VARIANT === "huawei";
 

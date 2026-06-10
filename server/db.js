@@ -371,11 +371,11 @@ export async function listAuthRejectionEvents(limit = 50) {
   return result.rows;
 }
 
-export async function saveBillingEvent({ userId, eventType, purchaseToken, payload }) {
+export async function saveBillingEvent({ userId, provider = "google_play", eventType, purchaseToken, payload }) {
   await pool.query(
     `INSERT INTO billing_events (user_id, provider, event_type, purchase_token, payload)
-     VALUES ($1, 'google_play', $2, $3, $4::jsonb)`,
-    [userId ?? null, eventType, purchaseToken ?? null, JSON.stringify(payload ?? {})],
+     VALUES ($1, $2, $3, $4, $5::jsonb)`,
+    [userId ?? null, provider, eventType, purchaseToken ?? null, JSON.stringify(payload ?? {})],
   );
 }
 
@@ -530,7 +530,7 @@ export async function getActiveWebhookSubscription(userId) {
     `SELECT id, user_id, provider, product_id, subscription_state, expires_at, is_auto_renewing
      FROM subscriptions
      WHERE user_id = $1
-       AND provider IN ('paypal', 'gumroad')
+       AND provider IN ('paypal', 'gumroad', 'amazon')
        AND subscription_state IN ('ACTIVE', 'active')
        AND (expires_at IS NULL OR expires_at > NOW())
      ORDER BY expires_at DESC NULLS LAST

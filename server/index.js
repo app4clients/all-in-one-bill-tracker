@@ -1380,6 +1380,191 @@ app.get("/api/billing/entitlement/:appUserId", async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════
+// AMAZON IAP VERIFICATION
+// ═══════════════════════════════════════════════════════
+const AMAZON_SHARED_SECRET = process.env.AMAZON_SHARED_SECRET ?? "";
+const AMAZON_ALLOWED_SKUS = (process.env.AMAZON_ALLOWED_SKUS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const AMAZON_SANDBOX = process.env.AMAZON_SANDBOX === "true";
+
+const amazonVerifyReceiptSchema = z.object({
+  receipt: z.object({
+    receiptId: z.string().min(1),
+    sku: z.string().min(1),
+    productType: z.string().optional(),
+    purchaseDate: z.number().nullable().optional(),
+    cancelDate: z.number().nullable().optional(),
+  }),
+  sku: z.string().min(1),
+  userId: z.string().min(1), // obligatoire en production Amazon RVS
+  marketplace: z.string().nullable().optional(),
+});
+
+async function verifyAmazonReceipt({ userId, receiptId }) {
+  if (!AMAZON_SHARED_SECRET) {
+    throw new Error("AMAZON_SHARED_SECRET is not configured");
+  }
+
+  const baseUrl = AMAZON_SANDBOX
+    ? "https://appstore-sdk.amazon.com/sandbox"
+    : "https://appstore-sdk.amazon.com";
+
+  const url = `${baseUrl}/version/1.0/verifyReceiptId/developer/${AMAZON_SHARED_SECRET}/user/${userId}/receiptId/${receiptId}`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Accept": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Amazon RVS error: ${response.status} - ${text}`);
+  }
+
+  const data = await response.json();
+  return data;
+}
+
+app.post("/api/billing/entitlement-amazon/:appUserId", async (req, res) => {
+  try {
+    const appUserId = req.params.appUserId;
+
+    if (!appUserId || appUserId.length < 3) {
+      return res.status(400).json({
+        ok: false,
+        code: "INVALID_USER_ID",
+        message: "Invalid appUserId",
+      });
+    }
+
+    const parsed = amazonVerifyReceiptSchema.parse(req.body);
+    const receipt = parsed.receipt;
+    const amazonUserId = parsed.userId;
+    const marketplace = parsed.marketplace ?? null;
+
+    if (parsed.sku !== receipt.sku) {
+      return res.status(400).json({
+        ok: false,
+        code: "SKU_MISMATCH",
+        message: "sku and receipt.sku must match",
+      });
+    }
+
+    if (AMAZON_ALLOWED_SKUS.length > 0 && !AMAZON_ALLOWED_SKUS.includes(receipt.sku)) {
+      return res.status(400).json({
+        ok: false,
+        code: "SKU_NOT_ALLOWED",
+        message: "SKU not allowed",
+      });
+    }
+
+    let verificationResult;
+    try {
+      verificationResult = await verifyAmazonReceipt({
+        userId: amazonUserId,
+        receiptId: receipt.receiptId,
+      });
+    } catch (verifyError) {
+      await saveBillingEvent({
+        userId: appUserId,
+        provider: "amazon",
+        eventType: "amazon_verify_failed",
+        purchaseToken: receipt.receiptId,
+        payload: {
+          error: verifyError instanceof Error ? verifyError.message : "Verification failed",
+          receipt,
+          amazonUserId,
+          marketplace,
+        },
+      });
+
+      return res.status(400).json({
+        ok: false,
+        code: "AMAZON_VERIFY_FAILED",
+        message: verifyError instanceof Error ? verifyError.message : "Receipt verification failed",
+      });
+    }
+
+    const rvsProductId = verificationResult?.productId ?? verificationResult?.termSku ?? null;
+    if (rvsProductId && rvsProductId !== receipt.sku) {
+      return res.status(400).json({
+        ok: false,
+        code: "RVS_SKU_MISMATCH",
+        message: "RVS productId does not match receipt.sku",
+      });
+    }
+
+    const cancelDateMs = Number(verificationResult?.cancelDate ?? receipt.cancelDate ?? 0) || 0;
+    const renewalDateMs = Number(verificationResult?.renewalDate ?? 0) || 0;
+    const now = Date.now();
+
+    const expiresAtDate = renewalDateMs > 0
+      ? new Date(renewalDateMs)
+      : cancelDateMs > 0
+      ? new Date(cancelDateMs)
+      : null;
+
+    const isCancelled = cancelDateMs > 0;
+    const isExpired = renewalDateMs > 0 ? renewalDateMs <= now : isCancelled;
+    const premiumActive = !isCancelled && !isExpired;
+    const subscriptionState = premiumActive ? "ACTIVE" : (isCancelled ? "CANCELLED" : "EXPIRED");
+
+    await ensureUser(appUserId);
+    await upsertWebhookSubscription({
+      userId: appUserId,
+      provider: "amazon",
+      productId: receipt.sku,
+      purchaseToken: receipt.receiptId,
+      subscriptionState,
+      isAutoRenewing: Boolean(verificationResult?.autoRenewing),
+      expiresAt: expiresAtDate ?? new Date(),
+      rawPayload: {
+        receipt,
+        verification: verificationResult,
+        amazonUserId,
+        marketplace,
+      },
+    });
+
+    await saveBillingEvent({
+      userId: appUserId,
+      provider: "amazon",
+      eventType: premiumActive ? "amazon_activated" : "amazon_inactive",
+      purchaseToken: receipt.receiptId,
+      payload: { receipt, verification: verificationResult, amazonUserId, marketplace },
+    });
+
+    return res.json({
+      ok: true,
+      premiumActive,
+      productId: receipt.sku,
+      expiresAt: expiresAtDate ? expiresAtDate.toISOString() : null,
+      state: subscriptionState,
+      autoRenewing: Boolean(verificationResult?.autoRenewing),
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        ok: false,
+        code: "INVALID_PAYLOAD",
+        message: "Invalid request payload",
+        details: error.issues,
+      });
+    }
+
+    console.error("Amazon entitlement error:", error);
+    return res.status(500).json({
+      ok: false,
+      code: "AMAZON_ENTITLEMENT_FAILED",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
 
 app.use("/api/license", licenseRoutes);
 
